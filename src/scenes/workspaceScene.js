@@ -718,6 +718,17 @@ export default class WorkspaceScene extends Phaser.Scene {
         component.x = snapped.x;
         component.y = snapped.y;
 
+        // Check if dragging from panel onto an existing component on bench
+        const overlappingComponent = this.detectComponentOverlap(component, snapped);
+        if (overlappingComponent) {
+          // Delete the component on bench
+          const indexToRemove = this.placedComponents.indexOf(overlappingComponent);
+          if (indexToRemove > -1) {
+            this.placedComponents.splice(indexToRemove, 1);
+          }
+          overlappingComponent.destroy();
+        }
+
         const comp = component.getData("logicComponent");
         if (comp) {
           console.log("Component: " + comp);
