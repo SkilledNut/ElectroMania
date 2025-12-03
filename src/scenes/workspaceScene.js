@@ -394,6 +394,30 @@ export default class WorkspaceScene extends Phaser.Scene {
     return { x: snappedX, y: snappedY };
   }
 
+  /**
+   * Rebuild the entire circuit graph from all placed components
+   */
+  rebuildGraph() {
+    this.graph.clear();
+
+    for (const component of this.placedComponents) {
+      this.updateLogicNodePositions(component);
+      const comp = component.getData("logicComponent");
+      if (comp) {
+        this.graph.addComponent(comp);
+      }
+    }
+
+    console.log(
+      "[Scene] Rebuilt graph with",
+      this.graph.components.length,
+      "components"
+    );
+
+    // Auto-simulate after rebuild
+    this.graph.simulate();
+  }
+
   getRandomInt(min, max) {
     const minCeiled = Math.ceil(min);
     const maxFloored = Math.floor(max);
@@ -433,17 +457,14 @@ export default class WorkspaceScene extends Phaser.Scene {
     const snappedStart = this.snapToGrid(worldStart.x, worldStart.y);
     const snappedEnd = this.snapToGrid(worldEnd.x, worldEnd.y);
 
+    // Update node positions (don't add to graph here - rebuildGraph does that)
     if (comp.start) {
       comp.start.x = snappedStart.x;
       comp.start.y = snappedStart.y;
-      if (!comp.start.connected) comp.start.connected = new Set();
-      this.graph.addNode(comp.start);
     }
     if (comp.end) {
       comp.end.x = snappedEnd.x;
       comp.end.y = snappedEnd.y;
-      if (!comp.end.connected) comp.end.connected = new Set();
-      this.graph.addNode(comp.end);
     }
 
     // debug dots are top-level objects (not children). update their positions
@@ -500,9 +521,8 @@ export default class WorkspaceScene extends Phaser.Scene {
     draggedComponent.setData("logicComponent", targetLogic);
     targetComponent.setData("logicComponent", draggedLogic);
 
-    // update node positions for both components
-    this.updateLogicNodePositions(draggedComponent);
-    this.updateLogicNodePositions(targetComponent);
+    // Rebuild graph after swap
+    this.rebuildGraph();
   }
 
   createComponent(x, y, type, color) {
@@ -711,7 +731,12 @@ export default class WorkspaceScene extends Phaser.Scene {
 
       if (isInPanel && !wasInPanel) {
         // če je ob strani, se odstrani
+        const indexToRemove = this.placedComponents.indexOf(component);
+        if (indexToRemove > -1) {
+          this.placedComponents.splice(indexToRemove, 1);
+        }
         component.destroy();
+        this.rebuildGraph();
       } else if (!isInPanel && wasInPanel) {
         // s strani na mizo
         const snapped = this.snapToGrid(component.x, component.y);
@@ -719,30 +744,23 @@ export default class WorkspaceScene extends Phaser.Scene {
         component.y = snapped.y;
 
         // Check if dragging from panel onto an existing component on bench
-        const overlappingComponent = this.detectComponentOverlap(component, snapped);
+        const overlappingComponent = this.detectComponentOverlap(
+          component,
+          snapped
+        );
         if (overlappingComponent) {
           // Delete the component on bench
-          const indexToRemove = this.placedComponents.indexOf(overlappingComponent);
+          const indexToRemove =
+            this.placedComponents.indexOf(overlappingComponent);
           if (indexToRemove > -1) {
             this.placedComponents.splice(indexToRemove, 1);
           }
           overlappingComponent.destroy();
         }
 
-        const comp = component.getData("logicComponent");
-        if (comp) {
-          console.log("Component: " + comp);
-          this.graph.addComponent(comp);
-
-          // Add start/end nodes to graph if they exist
-          if (comp.start) this.graph.addNode(comp.start);
-          if (comp.end) this.graph.addNode(comp.end);
-        }
-
-        this.updateLogicNodePositions(component);
-
         component.setData("isRotated", false);
         component.setData("isInPanel", false);
+        this.placedComponents.push(component);
 
         this.createComponent(
           component.getData("originalX"),
@@ -751,27 +769,32 @@ export default class WorkspaceScene extends Phaser.Scene {
           component.getData("color")
         );
 
-        this.placedComponents.push(component);
+        this.rebuildGraph();
       } else if (!wasInPanel) {
         // on the workbench - check for overlap and swap if detected
         const snapped = this.snapToGrid(component.x, component.y);
-        const overlappingComponent = this.detectComponentOverlap(component, snapped);
+        const overlappingComponent = this.detectComponentOverlap(
+          component,
+          snapped
+        );
 
         if (overlappingComponent) {
           // swap with drag start position recorded
-          this.swapComponents(component, overlappingComponent, { x: dragStartX, y: dragStartY });
+          this.swapComponents(component, overlappingComponent, {
+            x: dragStartX,
+            y: dragStartY,
+          });
         } else {
           // no overlap, just snap to grid
           component.x = snapped.x;
           component.y = snapped.y;
-          this.updateLogicNodePositions(component);
         }
+        this.rebuildGraph();
       } else {
         // postavi se nazaj na originalno mesto
         component.x = component.getData("originalX");
         component.y = component.getData("originalY");
-
-        this.updateLogicNodePositions(component);
+        this.rebuildGraph();
       }
 
       this.time.delayedCall(500, () => {
@@ -804,6 +827,9 @@ export default class WorkspaceScene extends Phaser.Scene {
           angle: newRotation === 270 ? -90 : newRotation,
           duration: 150,
           ease: "Cubic.easeOut",
+          onComplete: () => {
+            this.rebuildGraph();
+          },
         });
       }
     });

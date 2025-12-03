@@ -1,166 +1,271 @@
+/**
+ * CircuitGraph - Complete rewrite for robust circuit analysis
+ *
+ * Core concepts:
+ * 1. Components have two terminals (start/end) with world coordinates
+ * 2. Terminals within CONNECTION_THRESHOLD distance are electrically connected
+ * 3. We build a connection map: position -> list of components touching that position
+ * 4. Path finding uses BFS to find routes from battery positive to negative
+ */
+
 class CircuitGraph {
-    constructor() {
-        this.nodes = new Map();
-        this.components = [];
-        this.MERGE_RADIUS = 25;
+  constructor() {
+    this.components = [];
+    this.CONNECTION_THRESHOLD = 35; // Snap distance for electrical connection
+  }
+
+  /**
+   * Clear and rebuild the entire circuit from placed components
+   */
+  clear() {
+    this.components = [];
+  }
+
+  /**
+   * Add a component to the circuit
+   * Component must have: id, type, start {x, y}, end {x, y}
+   */
+  addComponent(component) {
+    if (!component || !component.start || !component.end) {
+      console.warn("[Graph] Invalid component, skipping:", component);
+      return;
     }
 
-    // addNode(node) {
-    //     if (!node) return null;
+    // Store the component
+    this.components.push({
+      id: component.id,
+      type: component.type,
+      start: {
+        x: Math.round(component.start.x),
+        y: Math.round(component.start.y),
+      },
+      end: { x: Math.round(component.end.x), y: Math.round(component.end.y) },
+      is_on: component.is_on !== undefined ? component.is_on : true, // For switches
+      originalComponent: component, // Keep reference for updating state
+    });
+  }
 
-    //     if (!node.connected) node.connected = new Set();
+  /**
+   * Check if a component conducts electricity
+   */
+  isConductive(comp) {
+    if (!comp) return false;
 
-    //     for (const existingNode of this.nodes.values()) {
-    //         const dx = existingNode.x - node.x;
-    //         const dy = existingNode.y - node.y;
-    //         const distance = Math.hypot(dx, dy);
+    // Battery is NOT conductive (it's a source, not a path)
+    if (comp.type === "battery") return false;
 
-    //         if (distance < this.MERGE_RADIUS) {
-    //             node.connected.forEach(c => {
-    //                 if(c != existingNode)
-    //                     existingNode.connected.add(c)
-    //             });
-    //             if(node != existingNode)
-    //                 existingNode.connected.add(node);
-    //             node.connected.add(existingNode);
+    // Switch conductivity depends on state
+    if (comp.type === "switch") return comp.is_on === true;
 
-    //             return existingNode;
-    //         }
-    //     }
+    // Wires, bulbs, resistors conduct
+    return ["wire", "bulb", "resistor"].includes(comp.type);
+  }
 
-    //     this.nodes.set(node.id, node);
-    //     return node;
-    // }
-    addNode(node) {
-    if (!node) return null;
+  /**
+   * Get position key for terminal grouping
+   */
+  posKey(x, y) {
+    return `${Math.round(x)},${Math.round(y)}`;
+  }
 
-    if (!node.connected) node.connected = new Set();
+  /**
+   * Check if two positions are close enough to be electrically connected
+   */
+  areConnected(pos1, pos2) {
+    const dx = pos1.x - pos2.x;
+    const dy = pos1.y - pos2.y;
+    return Math.hypot(dx, dy) <= this.CONNECTION_THRESHOLD;
+  }
 
-    for (const existingNode of this.nodes.values()) {
-        const dx = existingNode.x - node.x;
-        const dy = existingNode.y - node.y;
-        const distance = Math.hypot(dx, dy);
+  /**
+   * Build a connection map: each position maps to list of components with a terminal there
+   * Returns: { positionKey: [{component, terminal: 'start'|'end'}] }
+   */
+  buildConnectionMap() {
+    const connectionMap = new Map();
 
-        if (distance < this.MERGE_RADIUS) {
-            // Merge the connections
-            // node.connected.forEach(c => existingNode.connected.add(c));
-            // Connect the nodes to each other
-            existingNode.connected.add(node);
-            node.connected.add(existingNode);
+    for (const comp of this.components) {
+      // Add start terminal
+      const startKey = this.posKey(comp.start.x, comp.start.y);
+      if (!connectionMap.has(startKey)) {
+        connectionMap.set(startKey, []);
+      }
+      connectionMap.get(startKey).push({ component: comp, terminal: "start" });
 
-            return existingNode;
+      // Add end terminal
+      const endKey = this.posKey(comp.end.x, comp.end.y);
+      if (!connectionMap.has(endKey)) {
+        connectionMap.set(endKey, []);
+      }
+      connectionMap.get(endKey).push({ component: comp, terminal: "end" });
+    }
+
+    // Merge nearby positions within CONNECTION_THRESHOLD
+    const mergedMap = new Map();
+    const processed = new Set();
+
+    for (const [key1, terminals1] of connectionMap) {
+      if (processed.has(key1)) continue;
+
+      const [x1, y1] = key1.split(",").map(Number);
+      const mergedTerminals = [...terminals1];
+      processed.add(key1);
+
+      // Find all nearby positions
+      for (const [key2, terminals2] of connectionMap) {
+        if (key1 === key2 || processed.has(key2)) continue;
+
+        const [x2, y2] = key2.split(",").map(Number);
+        if (this.areConnected({ x: x1, y: y1 }, { x: x2, y: y2 })) {
+          mergedTerminals.push(...terminals2);
+          processed.add(key2);
         }
+      }
+
+      mergedMap.set(key1, mergedTerminals);
     }
 
-    this.nodes.set(node.id, node);
-    return node;
-}
+    return mergedMap;
+  }
 
-
-    addComponent(component) {
-        if (!component || !component.start || !component.end) return;
-
-        component.start = this.addNode(component.start);
-        component.end = this.addNode(component.end);
-
-        component.start.connected.add(component.end);
-        component.end.connected.add(component.start);
-
-        this.components.push(component);
+  /**
+   * Find all complete paths from battery positive to battery negative
+   * Returns array of paths, where each path is array of component IDs
+   */
+  findCircuitPaths() {
+    // Find the battery
+    const battery = this.components.find((c) => c.type === "battery");
+    if (!battery) {
+      console.log("[Graph] No battery found");
+      return [];
     }
 
-    getConnections(node) {
-        return this.components.filter(comp =>
-            this.sameNode(comp.start, node) ||
-            this.sameNode(comp.end, node)
+    console.log("[Graph] Finding paths from battery", battery.id);
+    console.log("[Graph] Battery terminals:", battery.start, battery.end);
+
+    // Build connection map
+    const connectionMap = this.buildConnectionMap();
+
+    console.log(
+      "[Graph] Connection map built with",
+      connectionMap.size,
+      "junction points"
+    );
+    for (const [key, terminals] of connectionMap) {
+      console.log(
+        `  Junction ${key}:`,
+        terminals.map(
+          (t) => `${t.component.type}(${t.component.id}):${t.terminal}`
+        )
+      );
+    }
+
+    // BFS from battery start to battery end
+    const startKey = this.posKey(battery.start.x, battery.start.y);
+    const targetKey = this.posKey(battery.end.x, battery.end.y);
+
+    console.log("[Graph] Searching from", startKey, "to", targetKey);
+
+    const allPaths = [];
+    const queue = [
+      {
+        posKey: startKey,
+        visited: new Set(),
+        path: [],
+      },
+    ];
+
+    let iterations = 0;
+    const MAX_ITERATIONS = 10000;
+
+    while (queue.length > 0 && iterations < MAX_ITERATIONS) {
+      iterations++;
+      const { posKey, visited, path } = queue.shift();
+
+      // Check if we reached the target
+      if (posKey === targetKey && path.length > 0) {
+        console.log(
+          "[Graph] ✓ Found complete path:",
+          path.map((c) => `${c.type}(${c.id})`).join(" -> ")
         );
-    }
+        allPaths.push(path);
+        continue;
+      }
 
-    componentConducts(comp) {
-        if (!comp) return false;
-        const conductiveTypes = ['wire', 'bulb', 'resistor', 'battery'];
-        if (comp.type === 'switch') return comp.is_on;
-        return conductiveTypes.includes(comp.type);
-    }
+      // Get all terminals at this position
+      const terminals = connectionMap.get(posKey) || [];
 
-    sameNode(a, b) {
-        return a && b && a.x === b.x && a.y === b.y;
-    }
+      for (const { component, terminal } of terminals) {
+        // Skip if already visited this component
+        if (visited.has(component.id)) continue;
 
-    hasClosedLoop(current, target, visitedComps = new Set()) {
-        if (!current || !target) return false;
-
-        if (this.sameNode(current, target) && visitedComps.size > 0) {
-            return true;
+        // Skip non-conductive components
+        if (!this.isConductive(component)) {
+          console.log(
+            `[Graph]   Skip ${component.type}(${component.id}) - not conductive`
+          );
+          continue;
         }
 
-        for (const comp of this.getConnections(current)) {
-            if (!this.componentConducts(comp) || visitedComps.has(comp)) continue;
+        // Traverse to the other end of this component
+        const otherTerminal = terminal === "start" ? "end" : "start";
+        const nextPos = component[otherTerminal];
+        const nextPosKey = this.posKey(nextPos.x, nextPos.y);
 
-            visitedComps.add(comp);
-            
-            let next = this.sameNode(comp.start, current) ? comp.end : comp.start;
-            if (!next) continue;
+        // Create new state for this path
+        const newVisited = new Set(visited);
+        newVisited.add(component.id);
+        const newPath = [...path, component];
 
-            if(next == target && visitedComps.size < 2) continue;
+        console.log(
+          `[Graph]   Traverse ${component.type}(${component.id}) from ${posKey} to ${nextPosKey}`
+        );
 
-            if (next.type === 'switch' && !next.is_on) continue;
-
-            if (this.hasClosedLoop(next, target, visitedComps)) {
-                return true;
-            }
-
-            visitedComps.delete(comp);
-        }
-        
-        console.log("Breaks at " + current.id);
-        return false;
+        queue.push({
+          posKey: nextPosKey,
+          visited: newVisited,
+          path: newPath,
+        });
+      }
     }
 
-
-    simulate() {
-        const battery = this.components.find(c => c.type === 'battery');
-        if (!battery) {
-            console.log("No battery found.");
-            return -1;
-        }
-
-        const switches = this.components.filter(c => c.type === 'switche');
-        switches.forEach(s => {
-            if (!s.is_on) {
-                console.log("Switch " + s.id + " is OFF");
-                return -2;
-            }
-        })
-
-        const start = battery.start;
-        const end = battery.end;
-
-        for (const n of this.nodes.values()) {
-            console.log(`Node ${n.id}: (${n.x},${n.y}) connected to ${[...n.connected].map(c => c.id).join(',')}`);
-        }
-        console.log('----------------------------------------');
-
-        const closed = this.hasClosedLoop(start, end);
-
-        if (closed) {
-            console.log("Circuit closed! Current flows.");
-            const bulbs = this.components.filter(c => c.type === 'bulb');
-            console.log(bulbs);
-            bulbs.forEach(b => {
-                if (b.is_on) console.log(`Bulb ${b.id} is now ON.`);
-                else console.log(`Bulb ${b.id} is now OFF.`)
-            });
-            return 1;
-        } else {
-            console.log("Circuit open. No current flows.");
-            const bulbs = this.components.filter(c => c.type === 'bulb');
-            bulbs.forEach(b => {
-                if (typeof b.turnOff === 'function') b.turnOff();
-            });
-            return 0;
-        }
+    if (iterations >= MAX_ITERATIONS) {
+      console.warn("[Graph] Max iterations reached in BFS");
     }
+
+    console.log(`[Graph] Found ${allPaths.length} complete circuit path(s)`);
+    return allPaths;
+  }
+
+  /**
+   * Check if the circuit is complete (at least one path exists)
+   */
+  isCircuitComplete() {
+    const paths = this.findCircuitPaths();
+    return paths.length > 0;
+  }
+
+  /**
+   * Simulate the circuit and update component states
+   */
+  simulate() {
+    const isComplete = this.isCircuitComplete();
+
+    // Update bulbs based on circuit state
+    const bulbs = this.components.filter((c) => c.type === "bulb");
+    for (const bulb of bulbs) {
+      if (bulb.originalComponent) {
+        bulb.originalComponent.is_on = isComplete;
+      }
+    }
+
+    console.log(`[Graph] Circuit is ${isComplete ? "COMPLETE" : "OPEN"}`);
+    console.log(
+      `[Graph] ${bulbs.length} bulb(s) turned ${isComplete ? "ON" : "OFF"}`
+    );
+
+    return isComplete ? 1 : 0;
+  }
 }
 
 export { CircuitGraph };
