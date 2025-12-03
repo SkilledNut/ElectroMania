@@ -301,6 +301,11 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.placedComponents = [];
     this.gridSize = 40;
 
+    // Create graphics layer for electricity visualization
+    this.electricityGraphics = this.add.graphics();
+    this.electricityGraphics.setDepth(5); // Above components
+    this.electricityParticles = [];
+
     // Setup keyboard input for rotation
     this.input.keyboard.on("keydown-R", () => {
       // Find the component under the pointer
@@ -476,8 +481,9 @@ export default class WorkspaceScene extends Phaser.Scene {
 
     // Auto-simulate and update label after rebuild
     const result = this.graph.simulate();
-    this.updateCircuitStatusLabel(result);
+    this.updateCircuitStatusLabel(result.status);
     this.updateMissingComponentsLabel();
+    this.visualizeElectricity(result.paths);
   }
 
   /**
@@ -557,6 +563,151 @@ export default class WorkspaceScene extends Phaser.Scene {
       }
       this.sim = false;
     }
+  }
+
+  /**
+   * Visualize electricity flow along circuit paths
+   */
+  visualizeElectricity(paths) {
+    // Clear existing particles
+    this.electricityParticles.forEach((p) => {
+      if (p.tween) p.tween.remove();
+      p.destroy();
+    });
+    this.electricityParticles = [];
+    this.electricityGraphics.clear();
+
+    if (!paths || paths.length === 0) {
+      // No paths - circuit is open, no particles
+      return;
+    }
+
+    console.log(
+      "[Electricity] Visualizing flow through",
+      paths.length,
+      "path(s)"
+    );
+
+    // Create particles for ALL paths, not just the first one
+    const PARTICLE_COUNT_PER_PATH = 4;
+    const PARTICLE_SPEED = 4000; // ms per complete cycle
+
+    for (let pathIndex = 0; pathIndex < paths.length; pathIndex++) {
+      const path = paths[pathIndex];
+      if (!path || path.length === 0) continue;
+
+      for (let i = 0; i < PARTICLE_COUNT_PER_PATH; i++) {
+        const delay = i * (PARTICLE_SPEED / PARTICLE_COUNT_PER_PATH);
+
+        this.time.delayedCall(delay, () => {
+          this.createElectricityParticle(path);
+        });
+      }
+    }
+  }
+
+  /**
+   * Create a single electricity particle that flows through the path
+   */
+  createElectricityParticle(path) {
+    // Create a simple small particle
+    const particle = this.add.circle(0, 0, 6, 0xffdd00, 0.95);
+    particle.setDepth(10);
+
+    const waypoints = [];
+    const CONNECTION_THRESHOLD = 35;
+
+    // Helper to check if two points are connected
+    const areClose = (p1, p2) => {
+      const dx = p1.x - p2.x;
+      const dy = p1.y - p2.y;
+      return Math.hypot(dx, dy) <= CONNECTION_THRESHOLD;
+    };
+
+    // Build connected waypoints - ensure each component connects to the previous one
+    if (path.length > 0) {
+      const first = path[0];
+      waypoints.push({ x: first.start.x, y: first.start.y });
+      waypoints.push({ x: first.end.x, y: first.end.y });
+
+      for (let i = 1; i < path.length; i++) {
+        const prev = path[i - 1];
+        const curr = path[i];
+        const lastPoint = waypoints[waypoints.length - 1];
+
+        // Determine which end of current component connects to the previous
+        if (areClose(lastPoint, curr.start)) {
+          // Previous connects to current's start -> add start then end
+          waypoints.push({ x: curr.start.x, y: curr.start.y });
+          waypoints.push({ x: curr.end.x, y: curr.end.y });
+        } else if (areClose(lastPoint, curr.end)) {
+          // Previous connects to current's end -> add end then start (reversed)
+          waypoints.push({ x: curr.end.x, y: curr.end.y });
+          waypoints.push({ x: curr.start.x, y: curr.start.y });
+        } else {
+          // Not directly connected - just add in order
+          waypoints.push({ x: curr.start.x, y: curr.start.y });
+          waypoints.push({ x: curr.end.x, y: curr.end.y });
+        }
+      }
+
+      // Add battery terminals to close the loop
+      const battery = this.placedComponents.find(
+        (container) => container.getData("logicComponent")?.type === "battery"
+      );
+      if (battery) {
+        const batteryComp = battery.getData("logicComponent");
+        const lastPoint = waypoints[waypoints.length - 1];
+
+        // Connect back through battery to complete the circuit
+        if (areClose(lastPoint, batteryComp.end)) {
+          waypoints.push({ x: batteryComp.end.x, y: batteryComp.end.y });
+          waypoints.push({ x: batteryComp.start.x, y: batteryComp.start.y });
+        } else if (areClose(lastPoint, batteryComp.start)) {
+          waypoints.push({ x: batteryComp.start.x, y: batteryComp.start.y });
+          waypoints.push({ x: batteryComp.end.x, y: batteryComp.end.y });
+        }
+      }
+    }
+
+    if (waypoints.length === 0) {
+      particle.destroy();
+      return;
+    }
+
+    let currentWaypoint = 0;
+    particle.setPosition(waypoints[0].x, waypoints[0].y);
+
+    const moveToNext = () => {
+      currentWaypoint++;
+      if (currentWaypoint >= waypoints.length) {
+        // Loop back to start
+        currentWaypoint = 0;
+      }
+
+      const target = waypoints[currentWaypoint];
+      const distance = Phaser.Math.Distance.Between(
+        particle.x,
+        particle.y,
+        target.x,
+        target.y
+      );
+      const duration = Math.max(200, distance * 2); // proportional to distance
+
+      const tween = this.tweens.add({
+        targets: particle,
+        x: target.x,
+        y: target.y,
+        duration: duration,
+        ease: "Sine.easeInOut",
+        onComplete: moveToNext,
+      });
+
+      particle.tween = tween;
+    };
+
+    moveToNext();
+    this.electricityParticles.push(particle);
   }
 
   getRandomInt(min, max) {

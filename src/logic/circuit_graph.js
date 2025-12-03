@@ -247,9 +247,11 @@ class CircuitGraph {
 
   /**
    * Simulate the circuit and update component states
+   * Returns: { status: number, paths: array of component arrays }
    */
   simulate() {
-    const isComplete = this.isCircuitComplete();
+    const paths = this.findCircuitPaths();
+    const isComplete = paths.length > 0;
 
     // Update bulbs based on circuit state
     const bulbs = this.components.filter((c) => c.type === "bulb");
@@ -264,7 +266,10 @@ class CircuitGraph {
       `[Graph] ${bulbs.length} bulb(s) turned ${isComplete ? "ON" : "OFF"}`
     );
 
-    return isComplete ? 1 : 0;
+    return {
+      status: isComplete ? 1 : 0,
+      paths: paths,
+    };
   }
 }
 
