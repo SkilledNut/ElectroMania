@@ -438,6 +438,63 @@ export default class WorkspaceScene extends Phaser.Scene {
     // Auto-simulate and update label after rebuild
     const result = this.graph.simulate();
     this.updateCircuitStatusLabel(result);
+    this.updateMissingComponentsLabel();
+  }
+
+  /**
+   * Update the label showing missing components for current challenge
+   */
+  updateMissingComponentsLabel() {
+    if (
+      !this.missingText ||
+      !this.challenges ||
+      this.currentChallengeIndex === undefined
+    )
+      return;
+
+    const currentChallenge = this.challenges[this.currentChallengeIndex];
+    if (!currentChallenge || !currentChallenge.requiredComponents) {
+      this.missingText.setText("");
+      return;
+    }
+
+    // Count placed components by type
+    const placedTypes = this.placedComponents.map((comp) =>
+      comp.getData("type")
+    );
+
+    // Find missing components
+    const missing = [];
+    const requiredCounts = {};
+
+    // Count required components
+    for (const req of currentChallenge.requiredComponents) {
+      requiredCounts[req] = (requiredCounts[req] || 0) + 1;
+    }
+
+    // Count placed components
+    const placedCounts = {};
+    for (const type of placedTypes) {
+      placedCounts[type] = (placedCounts[type] || 0) + 1;
+    }
+
+    // Calculate what's missing
+    for (const [type, requiredCount] of Object.entries(requiredCounts)) {
+      const placedCount = placedCounts[type] || 0;
+      const missingCount = requiredCount - placedCount;
+      if (missingCount > 0) {
+        missing.push(`${missingCount}x ${type}`);
+      }
+    }
+
+    // Update label
+    if (missing.length > 0) {
+      this.missingText.setText(`Manjka: ${missing.join(", ")}`);
+      this.missingText.setStyle({ color: "#146c9fff" });
+    } else {
+      this.missingText.setText("Vse komponente so na mizi ✓");
+      this.missingText.setStyle({ color: "#00aa00" });
+    }
   }
 
   /**
