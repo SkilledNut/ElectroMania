@@ -176,6 +176,15 @@ export default class WorkspaceScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
+    this.missingText = this.add
+      .text(width / 2, height - 100, "", {
+        fontSize: "14px",
+        color: "#146c9fff",
+        fontStyle: "bold",
+        padding: { x: 15, y: 8 },
+      })
+      .setOrigin(0.5);
+
     const buttonWidth = 180;
     const buttonHeight = 45;
     const cornerRadius = 10;
@@ -338,6 +347,36 @@ export default class WorkspaceScene extends Phaser.Scene {
       voltmeter: "Meri električno napetost\nEnota: volti (V)",
     };
     return details[type] || "Komponenta";
+  }
+
+  getMissingComponents() {
+    const currentChallenge = this.challenges[this.currentChallengeIndex];
+    const placedTypes = this.placedComponents.map((comp) =>
+      comp.getData("type")
+    );
+
+    const missing = [];
+    for (const required of currentChallenge.requiredComponents) {
+      const count = currentChallenge.requiredComponents.filter(
+        (r) => r === required
+      ).length;
+      const placed = placedTypes.filter((p) => p === required).length;
+      if (placed < count) {
+        missing.push(`${required} (${placed}/${count})`);
+      }
+    }
+    return missing;
+  }
+
+  updateMissingLabel() {
+    const missing = this.getMissingComponents();
+    if (missing.length > 0) {
+      this.missingText.setText("Manjkajoče: " + missing.join(", "));
+      this.missingText.setStyle({ color: "#006effff" });
+    } else {
+      this.missingText.setText("Vse komponente so na mizi!");
+      this.missingText.setStyle({ color: "#00aa00" });
+    }
   }
 
   createGrid() {
@@ -945,8 +984,10 @@ export default class WorkspaceScene extends Phaser.Scene {
       this.promptText.setText(
         this.challenges[this.currentChallengeIndex].prompt
       );
+      this.updateMissingLabel();
     } else {
       this.promptText.setText("Vse naloge so uspešno opravljene! Čestitke!");
+      this.missingText.setText("");
       localStorage.removeItem("currentChallengeIndex");
     }
   }
