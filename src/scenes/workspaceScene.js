@@ -230,24 +230,6 @@ export default class WorkspaceScene extends Phaser.Scene {
       this.scene.start("ScoreboardScene", { cameFromMenu: false })
     );
     makeButton(width - 140, 125, "Preveri krog", () => this.checkCircuit());
-    makeButton(width - 140, 175, "Simulacija", () => {
-      this.connected = this.graph.simulate();
-      if (this.connected == 1) {
-        this.checkText.setStyle({ color: "#00aa00" });
-        this.checkText.setText("Električni tok je sklenjen");
-        this.sim = true;
-        return;
-      }
-      this.checkText.setStyle({ color: "#cc0000" });
-      if (this.connected == -1) {
-        this.checkText.setText("Manjka ti baterija");
-      } else if (this.connected == -2) {
-        this.checkText.setText("Stikalo je izklopljeno");
-      } else if (this.connected == 0) {
-        this.checkText.setText("Električni tok ni sklenjen");
-      }
-      this.sim = false;
-    });
 
     // stranska vrstica na levi
     const panelWidth = 150;
@@ -414,8 +396,32 @@ export default class WorkspaceScene extends Phaser.Scene {
       "components"
     );
 
-    // Auto-simulate after rebuild
-    this.graph.simulate();
+    // Auto-simulate and update label after rebuild
+    const result = this.graph.simulate();
+    this.updateCircuitStatusLabel(result);
+  }
+
+  /**
+   * Update the status label based on simulation result
+   */
+  updateCircuitStatusLabel(simulationResult) {
+    if (!this.checkText) return;
+
+    if (simulationResult === 1) {
+      this.checkText.setStyle({ color: "#00aa00" });
+      this.checkText.setText("Električni tok je sklenjen");
+      this.sim = true;
+    } else {
+      this.checkText.setStyle({ color: "#cc0000" });
+      if (simulationResult === -1) {
+        this.checkText.setText("Manjka ti baterija");
+      } else if (simulationResult === -2) {
+        this.checkText.setText("Stikalo je izklopljeno");
+      } else {
+        this.checkText.setText("Električni tok ni sklenjen");
+      }
+      this.sim = false;
+    }
   }
 
   getRandomInt(min, max) {
@@ -803,6 +809,7 @@ export default class WorkspaceScene extends Phaser.Scene {
     });
 
     // Rotate on short click (pointerup) — ignore drags/long presses
+    // For switches, toggle instead of rotate
     component.on("pointerup", (pointer) => {
       if (component.getData("isInPanel")) return;
 
@@ -817,6 +824,30 @@ export default class WorkspaceScene extends Phaser.Scene {
       const MOVE_PX_THRESHOLD = 10; // px
 
       if (clickDuration <= CLICK_MS_THRESHOLD && moved <= MOVE_PX_THRESHOLD) {
+        const logicComp = component.getData("logicComponent");
+
+        // Handle switch toggle
+        if (logicComp && logicComp.type === "switch") {
+          logicComp.is_on = !logicComp.is_on;
+
+          // Update visual
+          const componentImage = component.list[0];
+          if (componentImage) {
+            componentImage.setTexture(
+              logicComp.is_on ? "stikalo-on" : "stikalo-off"
+            );
+          }
+
+          console.log(
+            `[Switch] ${logicComp.id} toggled to ${
+              logicComp.is_on ? "ON" : "OFF"
+            }`
+          );
+          this.rebuildGraph();
+          return;
+        }
+
+        // Handle rotation for non-switches
         const currentRotation = component.getData("rotation");
         const newRotation = (currentRotation + 90) % 360;
         component.setData("rotation", newRotation);
