@@ -459,6 +459,52 @@ export default class WorkspaceScene extends Phaser.Scene {
     }
   }
 
+  detectComponentOverlap(draggedComponent, snappedPos) {
+    const threshold = 50; // overlap threshold in pixels
+
+    for (let placed of this.placedComponents) {
+      if (placed === draggedComponent) continue;
+
+      const dx = Math.abs(snappedPos.x - placed.x);
+      const dy = Math.abs(snappedPos.y - placed.y);
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      if (distance < threshold) {
+        return placed;
+      }
+    }
+    return null;
+  }
+
+  swapComponents(draggedComponent, targetComponent, dragStartPos) {
+    // swap display positions: dragged goes to target's position, target goes to drag start position
+    const targetX = targetComponent.x;
+    const targetY = targetComponent.y;
+    const targetRotation = targetComponent.getData("rotation");
+    const targetAngle = targetComponent.angle;
+
+    targetComponent.x = dragStartPos.x;
+    targetComponent.y = dragStartPos.y;
+    targetComponent.setData("rotation", draggedComponent.getData("rotation"));
+    targetComponent.angle = draggedComponent.angle;
+
+    draggedComponent.x = targetX;
+    draggedComponent.y = targetY;
+    draggedComponent.setData("rotation", targetRotation);
+    draggedComponent.angle = targetAngle;
+
+    // swap logic components
+    const draggedLogic = draggedComponent.getData("logicComponent");
+    const targetLogic = targetComponent.getData("logicComponent");
+
+    draggedComponent.setData("logicComponent", targetLogic);
+    targetComponent.setData("logicComponent", draggedLogic);
+
+    // update node positions for both components
+    this.updateLogicNodePositions(draggedComponent);
+    this.updateLogicNodePositions(targetComponent);
+  }
+
   createComponent(x, y, type, color) {
     const component = this.add.container(x, y);
 
@@ -647,6 +693,9 @@ export default class WorkspaceScene extends Phaser.Scene {
 
     component.on("dragstart", () => {
       component.setData("isDragging", true);
+      component.setData("dragStartX", component.x);
+      component.setData("dragStartY", component.y);
+      component.setData("hasSwapped", false);
     });
 
     component.on("drag", (pointer, dragX, dragY) => {
@@ -656,11 +705,14 @@ export default class WorkspaceScene extends Phaser.Scene {
 
     component.on("dragend", () => {
       const isInPanel = component.x < 200;
+      const wasInPanel = component.getData("isInPanel");
+      const dragStartX = component.getData("dragStartX");
+      const dragStartY = component.getData("dragStartY");
 
-      if (isInPanel && !component.getData("isInPanel")) {
+      if (isInPanel && !wasInPanel) {
         // če je ob strani, se odstrani
         component.destroy();
-      } else if (!isInPanel && component.getData("isInPanel")) {
+      } else if (!isInPanel && wasInPanel) {
         // s strani na mizo
         const snapped = this.snapToGrid(component.x, component.y);
         component.x = snapped.x;
@@ -689,13 +741,20 @@ export default class WorkspaceScene extends Phaser.Scene {
         );
 
         this.placedComponents.push(component);
-      } else if (!component.getData("isInPanel")) {
-        // na mizi in se postavi na mrežo
+      } else if (!wasInPanel) {
+        // on the workbench - check for overlap and swap if detected
         const snapped = this.snapToGrid(component.x, component.y);
-        component.x = snapped.x;
-        component.y = snapped.y;
+        const overlappingComponent = this.detectComponentOverlap(component, snapped);
 
-        this.updateLogicNodePositions(component);
+        if (overlappingComponent) {
+          // swap with drag start position recorded
+          this.swapComponents(component, overlappingComponent, { x: dragStartX, y: dragStartY });
+        } else {
+          // no overlap, just snap to grid
+          component.x = snapped.x;
+          component.y = snapped.y;
+          this.updateLogicNodePositions(component);
+        }
       } else {
         // postavi se nazaj na originalno mesto
         component.x = component.getData("originalX");
@@ -892,22 +951,3 @@ export default class WorkspaceScene extends Phaser.Scene {
     }
   }
 }
-
-const config = {
-  type: Phaser.AUTO,
-  width: window.innerWidth,
-  height: window.innerHeight,
-  parent: "game-container",
-  backgroundColor: "#f0f0f0",
-  scale: {
-    mode: Phaser.Scale.RESIZE,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
-  },
-  scene: [LabScene, WorkspaceScene],
-  physics: {
-    default: "arcade",
-    arcade: {
-      debug: false,
-    },
-  },
-};
