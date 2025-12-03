@@ -301,6 +301,45 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.placedComponents = [];
     this.gridSize = 40;
 
+    // Setup keyboard input for rotation
+    this.input.keyboard.on("keydown-R", () => {
+      // Find the component under the pointer
+      const pointer = this.input.activePointer;
+      const worldX = pointer.worldX;
+      const worldY = pointer.worldY;
+
+      // Check which component is under the pointer
+      for (const component of this.placedComponents) {
+        if (component.getData("isInPanel")) continue;
+
+        const bounds = component.getBounds();
+        if (bounds.contains(worldX, worldY)) {
+          const logicComp = component.getData("logicComponent");
+
+          // Don't rotate switches, they should only toggle
+          if (logicComp && logicComp.type === "switch") continue;
+
+          // Rotate the component
+          const currentRotation = component.getData("rotation");
+          const newRotation = (currentRotation + 90) % 360;
+          component.setData("rotation", newRotation);
+          component.setData("isRotated", !component.getData("isRotated"));
+
+          this.tweens.add({
+            targets: component,
+            angle: newRotation === 270 ? -90 : newRotation,
+            duration: 150,
+            ease: "Cubic.easeOut",
+            onComplete: () => {
+              this.rebuildGraph();
+            },
+          });
+
+          break; // Only rotate the first component found
+        }
+      }
+    });
+
     // const scoreButton = this.add.text(this.scale.width / 1.1, 25, 'Lestvica', {
     //   fontFamily: 'Arial',
     //   fontSize: '18px',
@@ -904,8 +943,7 @@ export default class WorkspaceScene extends Phaser.Scene {
       });
     });
 
-    // Rotate on short click (pointerup) — ignore drags/long presses
-    // For switches, toggle instead of rotate
+    // Toggle switches on click
     component.on("pointerup", (pointer) => {
       if (component.getData("isInPanel")) return;
 
@@ -922,7 +960,7 @@ export default class WorkspaceScene extends Phaser.Scene {
       if (clickDuration <= CLICK_MS_THRESHOLD && moved <= MOVE_PX_THRESHOLD) {
         const logicComp = component.getData("logicComponent");
 
-        // Handle switch toggle
+        // Handle switch toggle on click
         if (logicComp && logicComp.type === "switch") {
           logicComp.is_on = !logicComp.is_on;
 
@@ -940,24 +978,7 @@ export default class WorkspaceScene extends Phaser.Scene {
             }`
           );
           this.rebuildGraph();
-          return;
         }
-
-        // Handle rotation for non-switches
-        const currentRotation = component.getData("rotation");
-        const newRotation = (currentRotation + 90) % 360;
-        component.setData("rotation", newRotation);
-        component.setData("isRotated", !component.getData("isRotated"));
-
-        this.tweens.add({
-          targets: component,
-          angle: newRotation === 270 ? -90 : newRotation,
-          duration: 150,
-          ease: "Cubic.easeOut",
-          onComplete: () => {
-            this.rebuildGraph();
-          },
-        });
       }
     });
 
