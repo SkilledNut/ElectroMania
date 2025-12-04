@@ -261,15 +261,32 @@ class CircuitGraph {
       }
     }
 
-    console.log(`[Graph] Circuit is ${isComplete ? "COMPLETE" : "OPEN"}`);
-    console.log(
-      `[Graph] ${bulbs.length} bulb(s) turned ${isComplete ? "ON" : "OFF"}`
+    const battery = this.components.find((c) => c.type === "battery");
+    if (!battery) {
+      console.log("[Graph] No battery found, circuit is OPEN");
+      return { status: -1, paths: [] };
+    }
+
+    if (isComplete) {
+      console.log(`[Graph] Circuit is COMPLETE`);
+      console.log(`[Graph] ${bulbs.length} bulb(s) turned ON`);
+      return { status: 1, paths: paths };
+    }
+
+    const hasSwitch = this.components.some((c) => c.type === "switch");
+    const anySwitchOff = this.components.some(
+      (c) => c.type === "switch" && c.is_on === false
     );
 
-    return {
-      status: isComplete ? 1 : 0,
-      paths: paths,
-    };
+    if (hasSwitch && anySwitchOff) {
+      console.log("[Graph] Circuit OPEN due to switch being OFF");
+      console.log(`[Graph] ${bulbs.length} bulb(s) turned OFF`);
+      return { status: -2, paths: [] };
+    }
+
+    console.log("[Graph] Circuit OPEN (no complete path)");
+    console.log(`[Graph] ${bulbs.length} bulb(s) turned OFF`);
+    return { status: 0, paths: [] };
   }
 }
 

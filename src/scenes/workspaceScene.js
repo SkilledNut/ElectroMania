@@ -90,7 +90,7 @@ export default class WorkspaceScene extends Phaser.Scene {
       {
         prompt:
           "Sestavi preprosti nesklenjeni električni krog z baterijo, svetilko in stikalom.",
-        requiredComponents: ["baterija", "svetilka", "žica", "stikalo-off"],
+        requiredComponents: ["baterija", "svetilka", "žica", "stikalo"],
         theory: [
           "V nesklenjenem krogu je stikalo odprto, kar pomeni, da je električni tok prekinjen. Svetilka posledično zato ne sveti.",
         ],
@@ -98,7 +98,7 @@ export default class WorkspaceScene extends Phaser.Scene {
       {
         prompt:
           "Sestavi preprosti sklenjeni električni krog z baterijo, svetilko in stikalom.",
-        requiredComponents: ["baterija", "svetilka", "žica", "stikalo-on"],
+        requiredComponents: ["baterija", "svetilka", "žica", "stikalo"],
         theory: [
           "V sklenjenem krogu je stikalo zaprto, kar pomeni, da lahko električni tok teče neovirano. Torej v tem primeru so vrata zaprta.",
         ],
@@ -110,8 +110,7 @@ export default class WorkspaceScene extends Phaser.Scene {
           "baterija",
           "svetilka",
           "žica",
-          "stikalo-on",
-          "stikalo-off",
+          "stikalo",
         ],
         theory: [
           "Stikalo nam omogoča nadzor nad pretokom električnega toka. Ko je stikalo zaprto, tok teče in posledično svetilka sveti. Kadar pa je stikalo odprto, tok ne teče in se svetilka ugasne. To lahko primerjamo z vklapljanjem in izklapljanjem električnih naprav v naših domovih.",
@@ -255,13 +254,12 @@ export default class WorkspaceScene extends Phaser.Scene {
 
     // komponente v stranski vrstici
     this.createComponent(panelWidth / 2, 100, "baterija", 0xffcc00);
-    this.createComponent(panelWidth / 2, 180, "upor", 0xff6600);
-    this.createComponent(panelWidth / 2, 260, "svetilka", 0xff0000);
-    this.createComponent(panelWidth / 2, 340, "stikalo-on", 0x666666);
-    this.createComponent(panelWidth / 2, 420, "stikalo-off", 0x666666);
+    this.createComponent(panelWidth / 2, 200, "upor", 0xff6600);
+    this.createComponent(panelWidth / 2, 300, "svetilka", 0xff0000);
+    this.createComponent(panelWidth / 2, 400, "stikalo", 0x666666);
     this.createComponent(panelWidth / 2, 500, "žica", 0x0066cc);
-    this.createComponent(panelWidth / 2, 580, "ampermeter", 0x00cc66);
-    this.createComponent(panelWidth / 2, 660, "voltmeter", 0x00cc66);
+    this.createComponent(panelWidth / 2, 600, "ampermeter", 0x00cc66);
+    this.createComponent(panelWidth / 2, 700, "voltmeter", 0x00cc66);
 
     const backButton = this.add
       .text(12, 10, "↩ Nazaj", {
@@ -305,6 +303,7 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.electricityGraphics = this.add.graphics();
     this.electricityGraphics.setDepth(5); // Above components
     this.electricityParticles = [];
+    this.electricityTimers = [];
 
     // Setup keyboard input for rotation
     this.input.keyboard.on("keydown-R", () => {
@@ -384,8 +383,7 @@ export default class WorkspaceScene extends Phaser.Scene {
       baterija: "Napetost: 3.3 V\nVir električne energije",
       upor: "Uporabnost: omejuje tok\nMeri se v ohmih (Ω)",
       svetilka: "Pretvarja električno energijo v svetlobo",
-      "stikalo-on": "Dovoljuje pretok toka",
-      "stikalo-off": "Prepreči pretok toka",
+      stikalo: "Stikalo: omogoča vklop/izklop pretoka toka",
       žica: "Povezuje komponente\nKlikni za obračanje",
       ampermeter: "Meri električni tok\nEnota: amperi (A)",
       voltmeter: "Meri električno napetost\nEnota: volti (V)",
@@ -569,16 +567,28 @@ export default class WorkspaceScene extends Phaser.Scene {
    * Visualize electricity flow along circuit paths
    */
   visualizeElectricity(paths) {
-    // Clear existing particles
-    this.electricityParticles.forEach((p) => {
-      if (p.tween) p.tween.remove();
-      p.destroy();
-    });
+    if (this.electricityTimers && this.electricityTimers.length > 0) {
+      for (const t of this.electricityTimers) {
+        if (!t) continue;
+        if (typeof t.remove === "function") {
+          try { t.remove(false); } catch (e) { if (typeof t.destroy === "function") t.destroy(); }
+        } else if (typeof t.destroy === "function") {
+          t.destroy();
+        }
+      }
+      this.electricityTimers = [];
+    }
+
+    if (this.electricityParticles && this.electricityParticles.length > 0) {
+      for (const p of this.electricityParticles) {
+        if (p.tween) p.tween.remove();
+        p.destroy();
+      }
+    }
     this.electricityParticles = [];
-    this.electricityGraphics.clear();
+    if (this.electricityGraphics) this.electricityGraphics.clear();
 
     if (!paths || paths.length === 0) {
-      // No paths - circuit is open, no particles
       return;
     }
 
@@ -588,9 +598,8 @@ export default class WorkspaceScene extends Phaser.Scene {
       "path(s)"
     );
 
-    // Create particles for ALL paths, not just the first one
     const PARTICLE_COUNT_PER_PATH = 4;
-    const PARTICLE_SPEED = 4000; // ms per complete cycle
+    const PARTICLE_SPEED = 4000;
 
     for (let pathIndex = 0; pathIndex < paths.length; pathIndex++) {
       const path = paths[pathIndex];
@@ -598,10 +607,10 @@ export default class WorkspaceScene extends Phaser.Scene {
 
       for (let i = 0; i < PARTICLE_COUNT_PER_PATH; i++) {
         const delay = i * (PARTICLE_SPEED / PARTICLE_COUNT_PER_PATH);
-
-        this.time.delayedCall(delay, () => {
+        const timer = this.time.delayedCall(delay, () => {
           this.createElectricityParticle(path);
         });
+        this.electricityTimers.push(timer);
       }
     }
   }
@@ -881,26 +890,7 @@ export default class WorkspaceScene extends Phaser.Scene {
         component.setData("logicComponent", comp);
         break;
 
-      case "stikalo-on":
-        id = "switch_" + this.getRandomInt(1000, 9999);
-        comp = new Switch(
-          id,
-          new Node(id + "_start", -40, 0),
-          new Node(id + "_end", 40, 0),
-          true
-        );
-        comp.type = "switch";
-        comp.localStart = { x: -40, y: 0 };
-        comp.localEnd = { x: 40, y: 0 };
-        componentImage = this.add
-          .image(0, 0, "stikalo-on")
-          .setOrigin(0.5)
-          .setDisplaySize(100, 100);
-        component.add(componentImage);
-        component.setData("logicComponent", comp);
-        break;
-
-      case "stikalo-off":
+      case "stikalo":
         id = "switch_" + this.getRandomInt(1000, 9999);
         comp = new Switch(
           id,
