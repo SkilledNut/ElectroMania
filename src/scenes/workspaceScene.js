@@ -978,6 +978,8 @@ export default class WorkspaceScene extends Phaser.Scene {
       .setOrigin(0.5);
     component.add(label);
 
+    component.setData("labelObject", label);
+    label.setVisible(true);
     component.setSize(70, 70);
     component.setInteractive({ draggable: true, useHandCursor: true });
 
@@ -1043,6 +1045,9 @@ export default class WorkspaceScene extends Phaser.Scene {
         component.setData("isRotated", false);
         component.setData("isInPanel", false);
         this.placedComponents.push(component);
+        
+        const lbl = component.getData("labelObject");
+        if (lbl) lbl.setVisible(false);
 
         this.createComponent(
           component.getData("originalX"),
