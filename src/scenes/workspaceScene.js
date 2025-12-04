@@ -1172,7 +1172,6 @@ export default class WorkspaceScene extends Phaser.Scene {
 
     this.checkText.setStyle({ color: "#00aa00" });
     this.checkText.setText("Čestitke! Krog je pravilen.");
-    this.addPoints(10);
 
     if (currentChallenge.theory) {
       this.showTheory(currentChallenge.theory);
@@ -1262,6 +1261,7 @@ export default class WorkspaceScene extends Phaser.Scene {
         this.continueButton.setStyle({ color: "#0066ff" })
       )
       .on("pointerdown", () => {
+        this.addPoints(10);
         this.hideTheory();
         this.placedComponents.forEach((comp) => comp.destroy());
         this.placedComponents = [];
