@@ -1045,16 +1045,19 @@ export default class WorkspaceScene extends Phaser.Scene {
       component.setScale(1);
     });
 
-    // Label
-    const label = this.add
-      .text(0, 30, type, {
-        fontSize: "11px",
-        color: "#fff",
-        backgroundColor: "#00000088",
-        padding: { x: 4, y: 2 },
-      })
-      .setOrigin(0.5);
-    component.add(label);
+    // Label - only show in panel
+    if (isInPanel) {
+      const label = this.add
+        .text(0, 30, type, {
+          fontSize: "11px",
+          color: "#fff",
+          backgroundColor: "#00000088",
+          padding: { x: 4, y: 2 },
+        })
+        .setOrigin(0.5);
+      component.add(label);
+      component.setData("label", label);
+    }
 
     component.setSize(70, 70);
     component.setInteractive({ draggable: true, useHandCursor: true });
@@ -1134,6 +1137,13 @@ export default class WorkspaceScene extends Phaser.Scene {
         component.setData("isInPanel", false);
         component.setScrollFactor(1);
         component.setDepth(100);
+        
+        // Hide label when moving from panel to workspace
+        const label = component.getData("label");
+        if (label) {
+          label.setVisible(false);
+        }
+        
         this.placedComponents.push(component);
 
         this.createComponent(
