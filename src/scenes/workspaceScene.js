@@ -13,9 +13,18 @@ export default class WorkspaceScene extends Phaser.Scene {
     super("WorkspaceScene");
   }
 
-  init() {
-    const savedIndex = localStorage.getItem("currentChallengeIndex");
-    this.currentChallengeIndex = savedIndex !== null ? parseInt(savedIndex) : 0;
+  init(data) {
+    // Mode can be 'challenge' or 'sandbox'
+    this.mode = data?.mode || 'challenge';
+    
+    if (this.mode === 'challenge') {
+      const savedIndex = localStorage.getItem("currentChallengeIndex");
+      this.currentChallengeIndex = savedIndex !== null ? parseInt(savedIndex) : 0;
+    }
+
+    // Infinite canvas settings for both modes
+    this.canvasWidth = 10000;
+    this.canvasHeight = 10000;
   }
 
   preload() {
@@ -33,27 +42,43 @@ export default class WorkspaceScene extends Phaser.Scene {
   create() {
     const { width, height } = this.cameras.main;
 
-    // površje mize
-    const desk = this.add.rectangle(0, 0, width, height, 0xe0c9a6).setOrigin(0);
+    // Set camera bounds to infinite canvas
+    this.cameras.main.setBounds(0, 0, this.canvasWidth, this.canvasHeight);
+    this.cameras.main.setZoom(1);
+
+    // Center camera initially
+    this.cameras.main.scrollX = (this.canvasWidth - width) / 2;
+    this.cameras.main.scrollY = (this.canvasHeight - height) / 2;
+
+    // Create infinite background with desk and grid
+    const desk = this.add.rectangle(
+      this.canvasWidth / 2,
+      this.canvasHeight / 2,
+      this.canvasWidth,
+      this.canvasHeight,
+      0xe0c9a6
+    );
+
     const gridGraphics = this.add.graphics();
     gridGraphics.lineStyle(1, 0x8b7355, 0.35);
     const gridSize = 40;
-    for (let x = 0; x < width; x += gridSize) {
+    for (let x = 0; x < this.canvasWidth; x += gridSize) {
       gridGraphics.beginPath();
       gridGraphics.moveTo(x, 0);
-      gridGraphics.lineTo(x, height);
+      gridGraphics.lineTo(x, this.canvasHeight);
       gridGraphics.strokePath();
     }
-    for (let y = 0; y < height; y += gridSize) {
+    for (let y = 0; y < this.canvasHeight; y += gridSize) {
       gridGraphics.beginPath();
       gridGraphics.moveTo(0, y);
-      gridGraphics.lineTo(width, y);
+      gridGraphics.lineTo(this.canvasWidth, y);
       gridGraphics.strokePath();
     }
 
     this.infoWindow = this.add.container(0, 0);
     this.infoWindow.setDepth(1000);
     this.infoWindow.setVisible(false);
+    this.infoWindow.setScrollFactor(0); // Fixed to camera
 
     // ozadje info okna
     const infoBox = this.add.rectangle(0, 0, 200, 80, 0x2c2c2c, 0.95);
@@ -152,38 +177,47 @@ export default class WorkspaceScene extends Phaser.Scene {
 
     // this.currentChallengeIndex = 0;
 
-    this.promptText = this.add
-      .text(
-        width / 1.8,
-        height - 30,
-        this.challenges[this.currentChallengeIndex].prompt,
-        {
-          fontSize: "20px",
-          color: "#333",
-          fontStyle: "bold",
-          backgroundColor: "#ffffff88",
-          padding: { x: 15, y: 8 },
-        }
-      )
-      .setOrigin(0.5);
+    // Create mode-specific UI elements
+    if (this.mode === 'challenge') {
+      this.promptText = this.add
+        .text(
+          width / 1.8,
+          height - 30,
+          this.challenges[this.currentChallengeIndex].prompt,
+          {
+            fontSize: "20px",
+            color: "#333",
+            fontStyle: "bold",
+            backgroundColor: "#ffffff88",
+            padding: { x: 15, y: 8 },
+          }
+        )
+        .setOrigin(0.5)
+        .setScrollFactor(0);
+    }
 
     this.checkText = this.add
-      .text(width / 2, height - 70, "", {
+      .text(width / 2, this.mode === 'sandbox' ? 70 : height - 70, "", {
         fontSize: "18px",
         color: "#cc0000",
         fontStyle: "bold",
         padding: { x: 15, y: 8 },
+        backgroundColor: this.mode === 'sandbox' ? "#ffffff88" : "",
       })
-      .setOrigin(0.5);
+      .setOrigin(0.5)
+      .setScrollFactor(0);
 
-    this.missingText = this.add
-      .text(width / 2, height - 100, "", {
-        fontSize: "14px",
-        color: "#146c9fff",
-        fontStyle: "bold",
-        padding: { x: 15, y: 8 },
-      })
-      .setOrigin(0.5);
+    if (this.mode === 'challenge') {
+      this.missingText = this.add
+        .text(width / 2, height - 100, "", {
+          fontSize: "14px",
+          color: "#146c9fff",
+          fontStyle: "bold",
+          padding: { x: 15, y: 8 },
+        })
+        .setOrigin(0.5)
+        .setScrollFactor(0);
+    }
 
     const buttonWidth = 180;
     const buttonHeight = 45;
@@ -199,6 +233,7 @@ export default class WorkspaceScene extends Phaser.Scene {
         buttonHeight,
         cornerRadius
       );
+      bg.setScrollFactor(0);
 
       const text = this.add
         .text(x, y, label, {
@@ -207,6 +242,7 @@ export default class WorkspaceScene extends Phaser.Scene {
           color: "#ffffff",
         })
         .setOrigin(0.5)
+        .setScrollFactor(0)
         .setInteractive({ useHandCursor: true })
         .on("pointerover", () => {
           bg.clear();
@@ -235,15 +271,28 @@ export default class WorkspaceScene extends Phaser.Scene {
       return { bg, text };
     };
 
-    makeButton(width - 140, 75, "Lestvica", () =>
-      this.scene.start("ScoreboardScene", { cameFromMenu: false })
-    );
-    makeButton(width - 140, 125, "Preveri krog", () => this.checkCircuit());
+    // Mode-specific buttons
+    if (this.mode === 'challenge') {
+      makeButton(width - 140, 75, "Lestvica", () =>
+        this.scene.start("ScoreboardScene", { cameFromMenu: false })
+      );
+      makeButton(width - 140, 125, "Preveri krog", () => this.checkCircuit());
+    } else {
+      // Sandbox mode buttons
+      makeButton(width - 140, 30, "Shrani", () => this.saveSandbox());
+      makeButton(width - 140, 80, "Naloži", () => this.loadSandbox());
+      makeButton(width - 140, 130, "Počisti", () => this.clearSandbox());
+      makeButton(width - 140, 180, "Simuliraj", () => {
+        const result = this.graph.simulate();
+        this.updateCircuitStatusLabel(result.status);
+        this.visualizeElectricity(result.paths);
+      });
+    }
 
     // stranska vrstica na levi
     const panelWidth = 150;
-    this.add.rectangle(0, 0, panelWidth, height, 0xc0c0c0).setOrigin(0);
-    this.add.rectangle(0, 0, panelWidth, height, 0x000000, 0.2).setOrigin(0);
+    this.add.rectangle(0, 0, panelWidth, height, 0xc0c0c0).setOrigin(0).setScrollFactor(0).setDepth(800);
+    this.add.rectangle(0, 0, panelWidth, height, 0x000000, 0.2).setOrigin(0).setScrollFactor(0).setDepth(801);
 
     this.add
       .text(panelWidth / 2, 60, "Komponente", {
@@ -251,17 +300,19 @@ export default class WorkspaceScene extends Phaser.Scene {
         color: "#ffffff",
         fontStyle: "bold",
       })
-      .setOrigin(0.5);
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(802);
 
     // komponente v stranski vrstici
-    this.createComponent(panelWidth / 2, 100, "baterija", 0xffcc00);
-    this.createComponent(panelWidth / 2, 180, "upor", 0xff6600);
-    this.createComponent(panelWidth / 2, 260, "svetilka", 0xff0000);
-    this.createComponent(panelWidth / 2, 340, "stikalo-on", 0x666666);
-    this.createComponent(panelWidth / 2, 420, "stikalo-off", 0x666666);
-    this.createComponent(panelWidth / 2, 500, "žica", 0x0066cc);
-    this.createComponent(panelWidth / 2, 580, "ampermeter", 0x00cc66);
-    this.createComponent(panelWidth / 2, 660, "voltmeter", 0x00cc66);
+    this.createComponent(panelWidth / 2, 100, "baterija", 0xffcc00, true);
+    this.createComponent(panelWidth / 2, 180, "upor", 0xff6600, true);
+    this.createComponent(panelWidth / 2, 260, "svetilka", 0xff0000, true);
+    this.createComponent(panelWidth / 2, 340, "stikalo-on", 0x666666, true);
+    this.createComponent(panelWidth / 2, 420, "stikalo-off", 0x666666, true);
+    this.createComponent(panelWidth / 2, 500, "žica", 0x0066cc, true);
+    this.createComponent(panelWidth / 2, 580, "ampermeter", 0x00cc66, true);
+    this.createComponent(panelWidth / 2, 660, "voltmeter", 0x00cc66, true);
 
     const backButton = this.add
       .text(12, 10, "↩ Nazaj", {
@@ -271,21 +322,28 @@ export default class WorkspaceScene extends Phaser.Scene {
         padding: { x: 20, y: 10 },
       })
       .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(900)
       .setInteractive({ useHandCursor: true })
       .on("pointerover", () => backButton.setStyle({ color: "#0054fdff" }))
       .on("pointerout", () => backButton.setStyle({ color: "#387affff" }))
       .on("pointerdown", () => {
         this.cameras.main.fade(300, 0, 0, 0);
         this.time.delayedCall(300, () => {
-          this.scene.start("LabScene");
+          this.scene.start(this.mode === 'sandbox' ? "MenuScene" : "LabScene");
         });
       });
 
+    // Mode-specific title
+    const titleText = this.mode === 'sandbox' 
+      ? "Sandbox način - Povleci zemljevid s srednjo tipko miške"
+      : "Povleci komponente na mizo in zgradi svoj električni krog!";
+    
     this.add
       .text(
         width / 2 + 50,
         30,
-        "Povleci komponente na mizo in zgradi svoj električni krog!",
+        titleText,
         {
           fontSize: "20px",
           color: "#333",
@@ -295,7 +353,9 @@ export default class WorkspaceScene extends Phaser.Scene {
           padding: { x: 15, y: 8 },
         }
       )
-      .setOrigin(0.5);
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(900);
 
     // shrani komponente na mizi
     this.placedComponents = [];
@@ -305,6 +365,14 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.electricityGraphics = this.add.graphics();
     this.electricityGraphics.setDepth(5); // Above components
     this.electricityParticles = [];
+
+    // Setup camera dragging (works in both modes)
+    this.setupCameraDragging();
+
+    // Load sandbox state if in sandbox mode
+    if (this.mode === 'sandbox') {
+      this.loadSandbox();
+    }
 
     // Setup keyboard input for rotation
     this.input.keyboard.on("keydown-R", () => {
@@ -817,7 +885,7 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.rebuildGraph();
   }
 
-  createComponent(x, y, type, color) {
+  createComponent(x, y, type, color, isInPanel = false) {
     const component = this.add.container(x, y);
 
     let comp = null;
@@ -996,10 +1064,16 @@ export default class WorkspaceScene extends Phaser.Scene {
     component.setData("originalY", y);
     component.setData("type", type);
     component.setData("color", color);
-    component.setData("isInPanel", true);
+    component.setData("isInPanel", isInPanel);
     component.setData("rotation", 0);
     if (comp) component.setData("logicComponent", comp);
     component.setData("isDragging", false);
+
+    // Set scroll factor and depth based on panel status
+    if (isInPanel) {
+      component.setScrollFactor(0);
+      component.setDepth(850);
+    }
 
     this.input.setDraggable(component);
 
@@ -1011,12 +1085,18 @@ export default class WorkspaceScene extends Phaser.Scene {
     });
 
     component.on("drag", (pointer, dragX, dragY) => {
-      component.x = dragX;
-      component.y = dragY;
+      if (component.getData("isInPanel")) {
+        component.x = dragX;
+        component.y = dragY;
+      } else {
+        // For components on canvas, use world coordinates
+        component.x = pointer.worldX;
+        component.y = pointer.worldY;
+      }
     });
 
-    component.on("dragend", () => {
-      const isInPanel = component.x < 200;
+    component.on("dragend", (pointer) => {
+      const isInPanel = pointer.x < 200;
       const wasInPanel = component.getData("isInPanel");
       const dragStartX = component.getData("dragStartX");
       const dragStartY = component.getData("dragStartY");
@@ -1031,7 +1111,7 @@ export default class WorkspaceScene extends Phaser.Scene {
         this.rebuildGraph();
       } else if (!isInPanel && wasInPanel) {
         // s strani na mizo
-        const snapped = this.snapToGrid(component.x, component.y);
+        const snapped = this.snapToGrid(pointer.worldX, pointer.worldY);
         component.x = snapped.x;
         component.y = snapped.y;
 
@@ -1052,19 +1132,22 @@ export default class WorkspaceScene extends Phaser.Scene {
 
         component.setData("isRotated", false);
         component.setData("isInPanel", false);
+        component.setScrollFactor(1);
+        component.setDepth(100);
         this.placedComponents.push(component);
 
         this.createComponent(
           component.getData("originalX"),
           component.getData("originalY"),
           component.getData("type"),
-          component.getData("color")
+          component.getData("color"),
+          true
         );
 
         this.rebuildGraph();
       } else if (!wasInPanel) {
         // on the workbench - check for overlap and swap if detected
-        const snapped = this.snapToGrid(component.x, component.y);
+        const snapped = this.snapToGrid(pointer.worldX, pointer.worldY);
         const overlappingComponent = this.detectComponentOverlap(
           component,
           snapped
@@ -1287,5 +1370,214 @@ export default class WorkspaceScene extends Phaser.Scene {
       this.continueButton.destroy();
       this.continueButton = null;
     }
+  }
+
+  setupCameraDragging() {
+    let isDraggingCamera = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let cameraStartX = 0;
+    let cameraStartY = 0;
+
+    this.input.on("pointerdown", (pointer) => {
+      // Only drag camera with middle mouse button
+      if (pointer.middleButtonDown()) {
+        isDraggingCamera = true;
+        dragStartX = pointer.x;
+        dragStartY = pointer.y;
+        cameraStartX = this.cameras.main.scrollX;
+        cameraStartY = this.cameras.main.scrollY;
+        this.input.setDefaultCursor('grab');
+      }
+    });
+
+    this.input.on("pointermove", (pointer) => {
+      if (isDraggingCamera) {
+        const deltaX = dragStartX - pointer.x;
+        const deltaY = dragStartY - pointer.y;
+        this.cameras.main.scrollX = cameraStartX + deltaX;
+        this.cameras.main.scrollY = cameraStartY + deltaY;
+      }
+    });
+
+    this.input.on("pointerup", (pointer) => {
+      if (isDraggingCamera) {
+        isDraggingCamera = false;
+        this.input.setDefaultCursor('default');
+      }
+    });
+
+    // Zoom with mouse wheel
+    this.input.on("wheel", (pointer, gameObjects, deltaX, deltaY, deltaZ) => {
+      const zoomAmount = deltaY > 0 ? -0.1 : 0.1;
+      const newZoom = Phaser.Math.Clamp(
+        this.cameras.main.zoom + zoomAmount,
+        0.5,
+        2
+      );
+      this.cameras.main.setZoom(newZoom);
+    });
+  }
+
+  saveSandbox() {
+    const saveData = {
+      components: this.placedComponents.map((comp) => ({
+        x: comp.x,
+        y: comp.y,
+        type: comp.getData("type"),
+        rotation: comp.getData("rotation"),
+        angle: comp.angle,
+        logicComponent: comp.getData("logicComponent")
+          ? {
+              id: comp.getData("logicComponent").id,
+              type: comp.getData("logicComponent").type,
+              is_on: comp.getData("logicComponent").is_on,
+            }
+          : null,
+      })),
+      cameraPosition: {
+        x: this.cameras.main.scrollX,
+        y: this.cameras.main.scrollY,
+        zoom: this.cameras.main.zoom,
+      },
+    };
+
+    localStorage.setItem("sandboxSave", JSON.stringify(saveData));
+    console.log("Sandbox saved!", saveData);
+
+    // Visual feedback
+    const { width, height } = this.cameras.main;
+    const text = this.add
+      .text(width / 2, height / 2, "Shranjeno!", {
+        fontSize: "32px",
+        color: "#00aa00",
+        backgroundColor: "#ffffff",
+        padding: { x: 20, y: 10 },
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(1000);
+
+    this.tweens.add({
+      targets: text,
+      alpha: 0,
+      duration: 1500,
+      ease: "Cubic.easeOut",
+      onComplete: () => text.destroy(),
+    });
+  }
+
+  loadSandbox() {
+    const saveData = localStorage.getItem("sandboxSave");
+    if (!saveData) {
+      console.log("No saved sandbox found");
+      return;
+    }
+
+    const data = JSON.parse(saveData);
+
+    // Clear existing components
+    this.placedComponents.forEach((comp) => comp.destroy());
+    this.placedComponents = [];
+
+    // Restore camera position
+    if (data.cameraPosition) {
+      this.cameras.main.scrollX = data.cameraPosition.x;
+      this.cameras.main.scrollY = data.cameraPosition.y;
+      this.cameras.main.setZoom(data.cameraPosition.zoom);
+    }
+
+    // Restore components
+    data.components.forEach((compData) => {
+      const component = this.createComponent(
+        compData.x,
+        compData.y,
+        compData.type,
+        0xffffff,
+        false
+      );
+      component.setData("rotation", compData.rotation);
+      component.angle = compData.angle;
+
+      // Restore logic component state
+      if (compData.logicComponent && component.getData("logicComponent")) {
+        const logicComp = component.getData("logicComponent");
+        if (logicComp.type === "switch" && compData.logicComponent.is_on !== undefined) {
+          logicComp.is_on = compData.logicComponent.is_on;
+          const componentImage = component.list[0];
+          if (componentImage) {
+            componentImage.setTexture(logicComp.is_on ? "stikalo-on" : "stikalo-off");
+          }
+        }
+      }
+    });
+
+    this.rebuildGraph();
+
+    console.log("Sandbox loaded!", data);
+
+    // Visual feedback
+    const { width, height } = this.cameras.main;
+    const text = this.add
+      .text(width / 2, height / 2, "Naloženo!", {
+        fontSize: "32px",
+        color: "#3399ff",
+        backgroundColor: "#ffffff",
+        padding: { x: 20, y: 10 },
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(1000);
+
+    this.tweens.add({
+      targets: text,
+      alpha: 0,
+      duration: 1500,
+      ease: "Cubic.easeOut",
+      onComplete: () => text.destroy(),
+    });
+  }
+
+  clearSandbox() {
+    // Clear all placed components
+    this.placedComponents.forEach((comp) => comp.destroy());
+    this.placedComponents = [];
+
+    // Clear electricity visualization
+    this.electricityParticles.forEach((p) => {
+      if (p.tween) p.tween.remove();
+      p.destroy();
+    });
+    this.electricityParticles = [];
+    this.electricityGraphics.clear();
+
+    // Rebuild graph
+    this.rebuildGraph();
+
+    // Clear status text
+    this.checkText.setText("");
+
+    console.log("Sandbox cleared");
+
+    // Visual feedback
+    const { width, height } = this.cameras.main;
+    const text = this.add
+      .text(width / 2, height / 2, "Počiščeno!", {
+        fontSize: "32px",
+        color: "#cc0000",
+        backgroundColor: "#ffffff",
+        padding: { x: 20, y: 10 },
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(1000);
+
+    this.tweens.add({
+      targets: text,
+      alpha: 0,
+      duration: 1500,
+      ease: "Cubic.easeOut",
+      onComplete: () => text.destroy(),
+    });
   }
 }

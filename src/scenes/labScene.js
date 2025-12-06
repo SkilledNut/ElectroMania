@@ -96,7 +96,7 @@ export default class LabScene extends Phaser.Scene {
     interactiveZone.on('pointerdown', () => {
       this.cameras.main.fade(300, 0, 0, 0);
       this.time.delayedCall(300, () => {
-        this.scene.start('WorkspaceScene');
+        this.scene.start('WorkspaceScene', { mode: 'challenge' });
       });
     });
     
@@ -184,6 +184,35 @@ export default class LabScene extends Phaser.Scene {
         })
         .on('pointerdown', () => {
             this.scene.start('ScoreboardScene', {cameFromMenu: true});
+        });
+
+    // za sandbox
+    const sandboxButtonBg = this.add.graphics();
+    sandboxButtonBg.fillStyle(0xff9933, 1);
+    sandboxButtonBg.fillRoundedRect(width - buttonWidth - rightMargin, topMargin + 60, buttonWidth, buttonHeight, cornerRadius);
+
+    const sandboxButton = this.add.text(width - buttonWidth / 2 - rightMargin, topMargin + buttonHeight / 2 + 60, 'Sandbox', {
+        fontFamily: 'Arial',
+        fontSize: '20px',
+        color: '#ffffff'
+    })
+        .setOrigin(0.5)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerover', () => {
+            sandboxButtonBg.clear();
+            sandboxButtonBg.fillStyle(0xcc7722, 1);
+            sandboxButtonBg.fillRoundedRect(width - buttonWidth - rightMargin, topMargin + 60, buttonWidth, buttonHeight, cornerRadius);
+        })
+        .on('pointerout', () => {
+            sandboxButtonBg.clear();
+            sandboxButtonBg.fillStyle(0xff9933, 1);
+            sandboxButtonBg.fillRoundedRect(width - buttonWidth - rightMargin, topMargin + 60, buttonWidth, buttonHeight, cornerRadius);
+        })
+        .on('pointerdown', () => {
+            this.cameras.main.fade(300, 0, 0, 0);
+            this.time.delayedCall(300, () => {
+                this.scene.start('WorkspaceScene', { mode: 'sandbox' });
+            });
         });
 
     // this.input.keyboard.on('keydown-ESC', () => {

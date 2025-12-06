@@ -11,7 +11,7 @@
 class CircuitGraph {
   constructor() {
     this.components = [];
-    this.CONNECTION_THRESHOLD = 35; // Snap distance for electrical connection
+    this.CONNECTION_THRESHOLD = 60; // Snap distance for electrical connection
   }
 
   /**
