@@ -369,10 +369,8 @@ export default class WorkspaceScene extends Phaser.Scene {
     // Setup camera dragging (works in both modes)
     this.setupCameraDragging();
 
-    // Load sandbox state if in sandbox mode
-    if (this.mode === 'sandbox') {
-      this.loadSandbox();
-    }
+    // Note: Don't auto-load sandbox on entry - let user choose to load with button
+    // This prevents black screen issues when camera was saved in an empty area
 
     // Setup keyboard input for rotation
     this.input.keyboard.on("keydown-R", () => {
@@ -1234,6 +1232,8 @@ export default class WorkspaceScene extends Phaser.Scene {
     component.on("pointerout", () => {
       component.setScale(1);
     });
+
+    return component;
   }
 
   checkCircuit() {
@@ -1490,15 +1490,9 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.placedComponents.forEach((comp) => comp.destroy());
     this.placedComponents = [];
 
-    // Restore camera position
-    if (data.cameraPosition) {
-      this.cameras.main.scrollX = data.cameraPosition.x;
-      this.cameras.main.scrollY = data.cameraPosition.y;
-      this.cameras.main.setZoom(data.cameraPosition.zoom);
-    }
-
-    // Restore components
-    data.components.forEach((compData) => {
+    // Restore components first
+    data.components.forEach((compData, index) => {
+      console.log(`Loading component ${index + 1}:`, compData.type, "at", compData.x, compData.y);
       const component = this.createComponent(
         compData.x,
         compData.y,
@@ -1521,6 +1515,18 @@ export default class WorkspaceScene extends Phaser.Scene {
         }
       }
     });
+
+    // Restore camera position with validation
+    if (data.cameraPosition) {
+      // Ensure camera position is within valid bounds
+      const scrollX = Phaser.Math.Clamp(data.cameraPosition.x, 0, this.canvasWidth - this.cameras.main.width);
+      const scrollY = Phaser.Math.Clamp(data.cameraPosition.y, 0, this.canvasHeight - this.cameras.main.height);
+      const zoom = Phaser.Math.Clamp(data.cameraPosition.zoom || 1, 0.5, 2);
+      
+      this.cameras.main.scrollX = scrollX;
+      this.cameras.main.scrollY = scrollY;
+      this.cameras.main.setZoom(zoom);
+    }
 
     this.rebuildGraph();
 
