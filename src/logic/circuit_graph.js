@@ -54,11 +54,14 @@ class CircuitGraph {
     // Battery is NOT conductive (it's a source, not a path)
     if (comp.type === "battery") return false;
 
+    // Voltmeter does NOT conduct (parallel connection, high resistance)
+    if (comp.type === "voltmeter") return false;
+
     // Switch conductivity depends on state
     if (comp.type === "switch") return comp.is_on === true;
 
-    // Wires, bulbs, resistors conduct
-    return ["wire", "bulb", "resistor"].includes(comp.type);
+    // Wires, bulbs, resistors, and ammeters conduct
+    return ["wire", "bulb", "resistor", "ammeter"].includes(comp.type);
   }
 
   /**
@@ -246,12 +249,67 @@ class CircuitGraph {
   }
 
   /**
+   * Check if a voltmeter is properly connected to the circuit
+   */
+  isVoltmeterConnected(voltmeter) {
+    // Build connection map to check if voltmeter terminals touch other components
+    const connectionMap = this.buildConnectionMap();
+    
+    const startKey = this.posKey(voltmeter.start.x, voltmeter.start.y);
+    const endKey = this.posKey(voltmeter.end.x, voltmeter.end.y);
+    
+    const startTerminals = connectionMap.get(startKey) || [];
+    const endTerminals = connectionMap.get(endKey) || [];
+    
+    // Check if at least one other component (not the voltmeter itself) is at each terminal
+    const startHasConnection = startTerminals.some(t => t.component.id !== voltmeter.id);
+    const endHasConnection = endTerminals.some(t => t.component.id !== voltmeter.id);
+    
+    return startHasConnection && endHasConnection;
+  }
+
+  /**
+   * Calculate circuit measurements (voltage and current)
+   */
+  calculateMeasurements(paths) {
+    const battery = this.components.find((c) => c.type === "battery");
+    if (!battery || paths.length === 0) {
+      return { voltage: 0, current: 0 };
+    }
+
+    // Assume battery voltage is 3.3V (as mentioned in component details)
+    const batteryVoltage = 3.3;
+
+    // Simple calculation: count resistive elements in the longest path
+    let maxPathLength = 0;
+    for (const path of paths) {
+      const resistiveCount = path.filter(c => 
+        ["resistor", "bulb", "ammeter"].includes(c.type)
+      ).length;
+      maxPathLength = Math.max(maxPathLength, resistiveCount);
+    }
+
+    // Assume each resistor/bulb has 1Ω resistance, ammeter has negligible resistance
+    // Using Ohm's law: I = V / R
+    const totalResistance = maxPathLength > 0 ? maxPathLength : 1;
+    const current = batteryVoltage / totalResistance;
+
+    return {
+      voltage: batteryVoltage,
+      current: current,
+    };
+  }
+
+  /**
    * Simulate the circuit and update component states
-   * Returns: { status: number, paths: array of component arrays }
+   * Returns: { status: number, paths: array of component arrays, measurements: object }
    */
   simulate() {
     const paths = this.findCircuitPaths();
     const isComplete = paths.length > 0;
+
+    // Calculate measurements
+    const measurements = this.calculateMeasurements(paths);
 
     // Update bulbs based on circuit state
     const bulbs = this.components.filter((c) => c.type === "bulb");
@@ -261,14 +319,37 @@ class CircuitGraph {
       }
     }
 
+    // Update ammeters - they show current if in a complete path
+    const ammeters = this.components.filter((c) => c.type === "ammeter");
+    for (const ammeter of ammeters) {
+      const isInPath = paths.some(path => 
+        path.some(comp => comp.id === ammeter.id)
+      );
+      if (ammeter.originalComponent) {
+        ammeter.originalComponent.current = isInPath && isComplete ? measurements.current : 0;
+      }
+    }
+
+    // Update voltmeters - check if both terminals are connected to circuit components
+    const voltmeters = this.components.filter((c) => c.type === "voltmeter");
+    for (const voltmeter of voltmeters) {
+      if (voltmeter.originalComponent) {
+        // Check if voltmeter terminals are connected to other components
+        const isConnected = this.isVoltmeterConnected(voltmeter);
+        voltmeter.originalComponent.voltage = isConnected && isComplete ? measurements.voltage : 0;
+      }
+    }
+
     console.log(`[Graph] Circuit is ${isComplete ? "COMPLETE" : "OPEN"}`);
     console.log(
       `[Graph] ${bulbs.length} bulb(s) turned ${isComplete ? "ON" : "OFF"}`
     );
+    console.log(`[Graph] Measurements: ${measurements.current.toFixed(2)}A, ${measurements.voltage.toFixed(2)}V`);
 
     return {
       status: isComplete ? 1 : 0,
       paths: paths,
+      measurements: measurements,
     };
   }
 }

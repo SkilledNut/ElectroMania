@@ -7,6 +7,8 @@ import { CircuitGraph } from "../logic/circuit_graph";
 import { Node } from "../logic/node";
 import { Switch } from "../components/switch";
 import { Resistor } from "../components/resistor";
+import { Ammeter } from "../components/ammeter";
+import { Voltmeter } from "../components/voltmeter";
 
 export default class WorkspaceScene extends Phaser.Scene {
   constructor() {
@@ -453,8 +455,8 @@ export default class WorkspaceScene extends Phaser.Scene {
       "stikalo-on": "Dovoljuje pretok toka",
       "stikalo-off": "Prepreči pretok toka",
       žica: "Povezuje komponente\nKlikni za obračanje",
-      ampermeter: "Meri električni tok\nEnota: amperi (A)",
-      voltmeter: "Meri električno napetost\nEnota: volti (V)",
+      ampermeter: "Meri električni tok\nEnota: amperi (A)\nPoveži zaporedno!",
+      voltmeter: "Meri električno napetost\nEnota: volti (V)\nPoveži vzporedno!",
     };
     return details[type] || "Komponenta";
   }
@@ -550,6 +552,27 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.updateCircuitStatusLabel(result.status);
     this.updateMissingComponentsLabel();
     this.visualizeElectricity(result.paths);
+    this.updateMeterDisplays();
+  }
+
+  /**
+   * Update the visual displays on ammeters and voltmeters
+   */
+  updateMeterDisplays() {
+    for (const component of this.placedComponents) {
+      const comp = component.getData("logicComponent");
+      const measurementText = component.getData("measurementText");
+      
+      if (!comp || !measurementText) continue;
+
+      if (comp.type === "ammeter") {
+        const current = comp.current || 0;
+        measurementText.setText(`${current.toFixed(2)} A`);
+      } else if (comp.type === "voltmeter") {
+        const voltage = comp.voltage || 0;
+        measurementText.setText(`${voltage.toFixed(2)} V`);
+      }
+    }
   }
 
   /**
@@ -1004,21 +1027,67 @@ export default class WorkspaceScene extends Phaser.Scene {
         break;
       case "ampermeter":
         id = "ammeter_" + this.getRandomInt(1000, 9999);
+        comp = new Ammeter(
+          id,
+          new Node(id + "_start", -40, 0),
+          new Node(id + "_end", 40, 0)
+        );
+        comp.type = "ammeter";
+        comp.current = 0;
+        comp.localStart = { x: -40, y: 0 };
+        comp.localEnd = { x: 40, y: 0 };
         componentImage = this.add
           .image(0, 0, "ampermeter")
           .setOrigin(0.5)
           .setDisplaySize(100, 100);
         component.add(componentImage);
-        component.setData("logicComponent", null);
+        
+        // Add text display for current reading (hidden in panel)
+        const ammeterText = this.add
+          .text(0, -45, "0.00 A", {
+            fontSize: "14px",
+            color: "#000000",
+            fontStyle: "bold",
+            backgroundColor: "#ffffffcc",
+            padding: { x: 5, y: 2 },
+          })
+          .setOrigin(0.5)
+          .setVisible(!isInPanel); // Hide if in panel
+        component.add(ammeterText);
+        component.setData("measurementText", ammeterText);
+        component.setData("logicComponent", comp);
         break;
       case "voltmeter":
         id = "voltmeter_" + this.getRandomInt(1000, 9999);
+        comp = new Voltmeter(
+          id,
+          new Node(id + "_start", -40, 0),
+          new Node(id + "_end", 40, 0)
+        );
+        comp.type = "voltmeter";
+        comp.voltage = 0;
+        comp.localStart = { x: -40, y: 0 };
+        comp.localEnd = { x: 40, y: 0 };
         componentImage = this.add
           .image(0, 0, "voltmeter")
           .setOrigin(0.5)
           .setDisplaySize(100, 100);
         component.add(componentImage);
-        component.setData("logicComponent", null);
+        
+        // Add text display for voltage reading (hidden in panel)
+        const voltmeterText = this.add
+          .text(0, -45, "0.00 V", {
+            fontSize: "14px",
+            color: "#000000",
+            fontStyle: "bold",
+            backgroundColor: "#ffffffcc",
+            padding: { x: 5, y: 2 },
+          })
+          .setOrigin(0.5)
+          .setVisible(!isInPanel); // Hide if in panel
+        component.add(voltmeterText);
+        component.setData("measurementText", voltmeterText);
+        component.setData("logicComponent", comp);
         break;
     }
 
@@ -1140,6 +1209,12 @@ export default class WorkspaceScene extends Phaser.Scene {
         const label = component.getData("label");
         if (label) {
           label.setVisible(false);
+        }
+        
+        // Show measurement text for meters when moving to workspace
+        const measurementText = component.getData("measurementText");
+        if (measurementText) {
+          measurementText.setVisible(true);
         }
         
         this.placedComponents.push(component);
