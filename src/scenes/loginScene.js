@@ -16,6 +16,9 @@ export default class LoginScene extends Phaser.Scene {
 
         const { width, height } = this.scale;
 
+        // Add resize listener
+        this.scale.on('resize', this.resize, this);
+
         // --- 1️⃣ Ozadje laboratorija (enako kot v LabScene) ---
         // svetla stena
         this.add.rectangle(0, 0, width, height - 150, 0xe8e8e8).setOrigin(0);
@@ -234,5 +237,12 @@ export default class LoginScene extends Phaser.Scene {
         // this.input.keyboard.on('keydown-ESC', () => {
         //     this.scene.start('MenuScene');
         // });
+    }
+
+    resize(gameSize) {
+        const { width, height } = gameSize;
+        
+        // Recreate the entire scene on resize to properly reposition all elements
+        this.scene.restart();
     }
 }

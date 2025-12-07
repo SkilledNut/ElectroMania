@@ -22,6 +22,9 @@ export default class LabScene extends Phaser.Scene {
   create() {
     const { width, height } = this.cameras.main;
     
+    // Add resize listener
+    this.scale.on('resize', this.resize, this);
+    
     // ozadje laboratorija
     this.add.rectangle(0, 0, width, height, 0xf0f0f0).setOrigin(0);
     
@@ -221,5 +224,12 @@ export default class LabScene extends Phaser.Scene {
 
     //console.log(`${localStorage.getItem('username')}`);
     console.log(JSON.parse(localStorage.getItem('users')));
+  }
+
+  resize(gameSize) {
+    const { width, height } = gameSize;
+    
+    // Recreate the entire scene on resize to properly reposition all elements
+    this.scene.restart();
   }
 }

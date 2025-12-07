@@ -44,6 +44,20 @@ export default class WorkspaceScene extends Phaser.Scene {
   create() {
     const { width, height } = this.cameras.main;
 
+    // Initialize resize timer
+    this.resizeTimer = null;
+
+    // Add resize listener with proper cleanup
+    this.scale.on('resize', this.handleResize, this);
+    
+    // Clean up on scene shutdown
+    this.events.once('shutdown', () => {
+      this.scale.off('resize', this.handleResize, this);
+      if (this.resizeTimer) {
+        clearTimeout(this.resizeTimer);
+      }
+    });
+
     // Set camera bounds to infinite canvas
     this.cameras.main.setBounds(0, 0, this.canvasWidth, this.canvasHeight);
     this.cameras.main.setZoom(1);
@@ -272,31 +286,32 @@ export default class WorkspaceScene extends Phaser.Scene {
       return { bg, text };
     };
 
-    // Mode-specific buttons
+    // Mode-specific buttons - store references for resize
+    this.uiButtons = [];
     if (this.mode === 'challenge') {
-      makeButton(width - 140, 75, "Lestvica", () =>
+      this.uiButtons.push(makeButton(width - 140, 75, "Lestvica", () =>
         this.scene.start("ScoreboardScene", { cameFromMenu: false })
-      );
-      makeButton(width - 140, 125, "Preveri krog", () => this.checkCircuit());
+      ));
+      this.uiButtons.push(makeButton(width - 140, 125, "Preveri krog", () => this.checkCircuit()));
     } else {
       // Sandbox mode buttons
-      makeButton(width - 140, 30, "Shrani", () => this.saveSandbox());
-      makeButton(width - 140, 80, "Naloži", () => this.loadSandbox());
-      makeButton(width - 140, 130, "Počisti", () => this.clearSandbox());
-      makeButton(width - 140, 180, "Simuliraj", () => {
+      this.uiButtons.push(makeButton(width - 140, 30, "Shrani", () => this.saveSandbox()));
+      this.uiButtons.push(makeButton(width - 140, 80, "Naloži", () => this.loadSandbox()));
+      this.uiButtons.push(makeButton(width - 140, 130, "Počisti", () => this.clearSandbox()));
+      this.uiButtons.push(makeButton(width - 140, 180, "Simuliraj", () => {
         const result = this.graph.simulate();
         this.updateCircuitStatusLabel(result.status);
         this.visualizeElectricity(result.paths);
-      });
+      }));
     }
 
     // stranska vrstica na levi
-    const panelWidth = 150;
-    this.add.rectangle(0, 0, panelWidth, height, 0xc0c0c0).setOrigin(0).setScrollFactor(0).setDepth(800);
-    this.add.rectangle(0, 0, panelWidth, height, 0x000000, 0.2).setOrigin(0).setScrollFactor(0).setDepth(801);
+    this.panelWidth = 150;
+    this.leftPanel = this.add.rectangle(0, 0, this.panelWidth, height, 0xc0c0c0).setOrigin(0).setScrollFactor(0).setDepth(800);
+    this.leftPanelOverlay = this.add.rectangle(0, 0, this.panelWidth, height, 0x000000, 0.2).setOrigin(0).setScrollFactor(0).setDepth(801);
 
-    this.add
-      .text(panelWidth / 2, 60, "Komponente", {
+    this.componentsPanelTitle = this.add
+      .text(this.panelWidth / 2, 60, "Komponente", {
         fontSize: "18px",
         color: "#ffffff",
         fontStyle: "bold",
@@ -305,16 +320,16 @@ export default class WorkspaceScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(802);
 
-    // komponente v stranski vrstici
-    this.createComponent(panelWidth / 2, 100, "baterija", 0xffcc00, true);
-    this.createComponent(panelWidth / 2, 180, "upor", 0xff6600, true);
-    this.createComponent(panelWidth / 2, 260, "svetilka", 0xff0000, true);
-    this.createComponent(panelWidth / 2, 340, "stikalo", 0x666666, true);
-    this.createComponent(panelWidth / 2, 420, "žica", 0x0066cc, true);
-    this.createComponent(panelWidth / 2, 500, "ampermeter", 0x00cc66, true);
-    this.createComponent(panelWidth / 2, 580, "voltmeter", 0x00cc66, true);
+    // komponente v stranski vrstici (these stay at fixed positions)
+    this.createComponent(this.panelWidth / 2, 100, "baterija", 0xffcc00, true);
+    this.createComponent(this.panelWidth / 2, 180, "upor", 0xff6600, true);
+    this.createComponent(this.panelWidth / 2, 260, "svetilka", 0xff0000, true);
+    this.createComponent(this.panelWidth / 2, 340, "stikalo", 0x666666, true);
+    this.createComponent(this.panelWidth / 2, 420, "žica", 0x0066cc, true);
+    this.createComponent(this.panelWidth / 2, 500, "ampermeter", 0x00cc66, true);
+    this.createComponent(this.panelWidth / 2, 580, "voltmeter", 0x00cc66, true);
 
-    const backButton = this.add
+    this.backButton = this.add
       .text(12, 10, "↩ Nazaj", {
         fontFamily: "Arial",
         fontSize: "20px",
@@ -325,8 +340,8 @@ export default class WorkspaceScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(900)
       .setInteractive({ useHandCursor: true })
-      .on("pointerover", () => backButton.setStyle({ color: "#0054fdff" }))
-      .on("pointerout", () => backButton.setStyle({ color: "#387affff" }))
+      .on("pointerover", () => this.backButton.setStyle({ color: "#0054fdff" }))
+      .on("pointerout", () => this.backButton.setStyle({ color: "#387affff" }))
       .on("pointerdown", () => {
         this.cameras.main.fade(300, 0, 0, 0);
         this.time.delayedCall(300, () => {
@@ -339,7 +354,7 @@ export default class WorkspaceScene extends Phaser.Scene {
       ? "Sandbox način - Povleci zemljevid s srednjo tipko miške"
       : "Povleci komponente na mizo in zgradi svoj električni krog!";
     
-    this.add
+    this.titleText = this.add
       .text(
         width / 2 + 50,
         30,
@@ -1876,5 +1891,86 @@ export default class WorkspaceScene extends Phaser.Scene {
       ease: "Cubic.easeOut",
       onComplete: () => text.destroy(),
     });
+  }
+
+  handleResize(gameSize) {
+    // Clear any pending resize timer
+    if (this.resizeTimer) {
+      clearTimeout(this.resizeTimer);
+    }
+
+    // Wait for resize to finish (user stops dragging) before repositioning
+    // This prevents constant repositioning during resize which causes freezing
+    this.resizeTimer = setTimeout(() => {
+      this.resize(gameSize);
+    }, 250); // Wait 250ms after last resize event
+  }
+
+  resize(gameSize) {
+    // Only resize if scene is still active
+    if (!this.scene.isActive()) {
+      return;
+    }
+
+    try {
+      const { width, height } = gameSize;
+      
+      // Resize left panel height
+      if (this.leftPanel) {
+        this.leftPanel.setDisplaySize(this.panelWidth, height);
+        this.leftPanelOverlay.setDisplaySize(this.panelWidth, height);
+      }
+      
+      // Reposition prompt text (challenge mode)
+      if (this.promptText) {
+        this.promptText.setPosition(width / 1.8, height - 30);
+      }
+      
+      // Reposition check text
+      if (this.checkText) {
+        this.checkText.setPosition(width / 2, this.mode === 'sandbox' ? 70 : height - 70);
+      }
+      
+      // Reposition missing text (challenge mode)
+      if (this.missingText) {
+        this.missingText.setPosition(width / 2, height - 100);
+      }
+      
+      // Reposition buttons
+      if (this.uiButtons && this.uiButtons.length > 0) {
+        const buttonWidth = 180;
+        const buttonHeight = 45;
+        const cornerRadius = 10;
+        
+        this.uiButtons.forEach((button, index) => {
+          if (!button || !button.text || !button.bg) return;
+          
+          const yOffset = this.mode === 'challenge' ? (index === 0 ? 75 : 125) : (30 + index * 50);
+          const x = width - 140;
+          const y = yOffset;
+          
+          // Reposition button text
+          button.text.setPosition(x, y);
+          
+          // Redraw button background
+          button.bg.clear();
+          button.bg.fillStyle(0x3399ff, 1);
+          button.bg.fillRoundedRect(
+            x - buttonWidth / 2,
+            y - buttonHeight / 2,
+            buttonWidth,
+            buttonHeight,
+            cornerRadius
+          );
+        });
+      }
+      
+      // Reposition title text
+      if (this.titleText) {
+        this.titleText.setPosition(width / 2 + 50, 30);
+      }
+    } catch (error) {
+      console.error('Error during resize:', error);
+    }
   }
 }

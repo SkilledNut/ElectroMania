@@ -19,6 +19,9 @@ export default class ScoreboardScene extends Phaser.Scene {
     create() {
         const { width, height } = this.scale;
 
+        // Add resize listener
+        this.scale.on('resize', this.resize, this);
+
         // ozadje
         // svetla stena
         this.add.rectangle(0, 0, width, height - 150, 0xe8e8e8).setOrigin(0);
@@ -149,5 +152,12 @@ export default class ScoreboardScene extends Phaser.Scene {
                 });
         }
 
+    }
+
+    resize(gameSize) {
+        const { width, height } = gameSize;
+        
+        // Recreate the entire scene on resize to properly reposition all elements
+        this.scene.restart();
     }
 }

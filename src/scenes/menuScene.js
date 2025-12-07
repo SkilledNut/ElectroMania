@@ -39,6 +39,9 @@ export default class MenuScene extends Phaser.Scene {
         const rectX = width / 2;
         const rectY = height / 2 - 30;
 
+        // Add resize listener
+        this.scale.on('resize', this.resize, this);
+
         const leftWireX = rectX - rectWidth / 2;
         const rightWireX = rectX + rectWidth / 2;
         const topWireY = rectY - rectHeight / 2;
@@ -274,5 +277,12 @@ enableStartButton(isActive) {
             this.startButtonBackground.fillStyle(0xdddddd, 1);
             this.startButtonBackground.fillRoundedRect(rectX - buttonWidth / 2, (rectY + 100) - buttonHeight / 2, buttonWidth, buttonHeight, cornerRadius);
         }
+    }
+
+    resize(gameSize) {
+        const { width, height } = gameSize;
+        
+        // Recreate the entire scene on resize to properly reposition all elements
+        this.scene.restart();
     }
 }
