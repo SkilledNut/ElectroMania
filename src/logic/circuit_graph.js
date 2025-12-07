@@ -277,21 +277,37 @@ class CircuitGraph {
       return { voltage: 0, current: 0 };
     }
 
-    // Assume battery voltage is 3.3V (as mentioned in component details)
-    const batteryVoltage = 3.3;
+    // Get actual battery voltage from the component
+    const batteryVoltage = battery.originalComponent?.voltage || 3.3;
 
-    // Simple calculation: count resistive elements in the longest path
-    let maxPathLength = 0;
-    for (const path of paths) {
-      const resistiveCount = path.filter(c => 
-        ["resistor", "bulb", "ammeter"].includes(c.type)
-      ).length;
-      maxPathLength = Math.max(maxPathLength, resistiveCount);
+    // Calculate total resistance in the circuit
+    let totalResistance = 0;
+    
+    if (paths.length > 0) {
+      // Use the first complete path to calculate resistance
+      const path = paths[0];
+      
+      for (const comp of path) {
+        if (comp.type === "resistor") {
+          // Get actual resistance value from the component
+          totalResistance += comp.originalComponent?.ohm || 1.5;
+        } else if (comp.type === "bulb") {
+          // Bulbs have approximately 1Ω resistance
+          totalResistance += 1;
+        } else if (comp.type === "ammeter") {
+          // Ammeters have negligible resistance (0.01Ω)
+          totalResistance += 0.01;
+        }
+        // Wires and switches have negligible resistance
+      }
     }
 
-    // Assume each resistor/bulb has 1Ω resistance, ammeter has negligible resistance
+    // Ensure minimum resistance to avoid division by zero
+    if (totalResistance < 0.01) {
+      totalResistance = 0.01;
+    }
+
     // Using Ohm's law: I = V / R
-    const totalResistance = maxPathLength > 0 ? maxPathLength : 1;
     const current = batteryVoltage / totalResistance;
 
     return {

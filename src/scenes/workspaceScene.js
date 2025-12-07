@@ -939,6 +939,20 @@ export default class WorkspaceScene extends Phaser.Scene {
           .setOrigin(0.5)
           .setDisplaySize(100, 100);
         component.add(componentImage);
+        
+        // Add voltage label
+        const voltageLabel = this.add
+          .text(0, 45, "3.3V", {
+            fontSize: "12px",
+            color: "#000000",
+            fontStyle: "bold",
+            backgroundColor: "#ffcc00cc",
+            padding: { x: 4, y: 2 },
+          })
+          .setOrigin(0.5)
+          .setVisible(!isInPanel);
+        component.add(voltageLabel);
+        component.setData("valueLabel", voltageLabel);
         component.setData("logicComponent", comp);
         break;
 
@@ -958,6 +972,20 @@ export default class WorkspaceScene extends Phaser.Scene {
           .setOrigin(0.5)
           .setDisplaySize(100, 100);
         component.add(componentImage);
+        
+        // Add resistance label
+        const resistanceLabel = this.add
+          .text(0, 45, "1.5Ω", {
+            fontSize: "12px",
+            color: "#000000",
+            fontStyle: "bold",
+            backgroundColor: "#ff6600cc",
+            padding: { x: 4, y: 2 },
+          })
+          .setOrigin(0.5)
+          .setVisible(!isInPanel);
+        component.add(resistanceLabel);
+        component.setData("valueLabel", resistanceLabel);
         component.setData("logicComponent", comp);
         break;
 
@@ -1207,6 +1235,12 @@ export default class WorkspaceScene extends Phaser.Scene {
           measurementText.setVisible(true);
         }
         
+        // Show value labels for batteries and resistors when moving to workspace
+        const valueLabel = component.getData("valueLabel");
+        if (valueLabel) {
+          valueLabel.setVisible(true);
+        }
+        
         this.placedComponents.push(component);
         
         const lbl = component.getData("labelObject");
@@ -1254,6 +1288,9 @@ export default class WorkspaceScene extends Phaser.Scene {
     });
 
     // Toggle switches on click
+    // Track last click time for double-click detection
+    component.setData("lastClickTime", 0);
+
     component.on("pointerup", (pointer) => {
       if (component.getData("isInPanel")) return;
 
@@ -1266,11 +1303,25 @@ export default class WorkspaceScene extends Phaser.Scene {
 
       const CLICK_MS_THRESHOLD = 300; // ms
       const MOVE_PX_THRESHOLD = 10; // px
+      const DOUBLE_CLICK_THRESHOLD = 400; // ms for double-click
 
       if (clickDuration <= CLICK_MS_THRESHOLD && moved <= MOVE_PX_THRESHOLD) {
         const logicComp = component.getData("logicComponent");
+        const currentTime = this.time.now;
+        const lastClickTime = component.getData("lastClickTime");
+        const timeSinceLastClick = currentTime - lastClickTime;
 
-        // Handle switch toggle on click
+        // Double-click detection for battery and resistor
+        if (timeSinceLastClick < DOUBLE_CLICK_THRESHOLD && 
+            logicComp && (logicComp.type === "battery" || logicComp.type === "resistor")) {
+          this.showPropertyEditor(component, logicComp);
+          component.setData("lastClickTime", 0); // Reset to prevent triple-click
+          return;
+        }
+
+        component.setData("lastClickTime", currentTime);
+
+        // Handle switch toggle on single click
         if (logicComp && logicComp.type === "switch") {
           logicComp.is_on = !logicComp.is_on;
 
@@ -1302,6 +1353,168 @@ export default class WorkspaceScene extends Phaser.Scene {
     });
 
     return component;
+  }
+
+  showPropertyEditor(component, logicComp) {
+    const { width, height } = this.cameras.main;
+    
+    // Create semi-transparent background
+    const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7)
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(2000)
+      .setInteractive();
+    
+    // Create dialog box (made wider)
+    const dialogWidth = 400;
+    const dialogHeight = 220;
+    const dialog = this.add.rectangle(width / 2, height / 2, dialogWidth, dialogHeight, 0xffffff, 1)
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(2001)
+      .setInteractive(); // Make dialog interactive to stop click propagation
+    dialog.setStrokeStyle(3, 0x3399ff);
+    
+    // Stop propagation of clicks on dialog to prevent overlay from closing
+    dialog.on('pointerdown', (pointer) => {
+      pointer.event.stopPropagation();
+    });
+    
+    // Title
+    const title = logicComp.type === "battery" ? "Nastavi napetost" : "Nastavi upornost";
+    const titleText = this.add.text(width / 2, height / 2 - 70, title, {
+      fontSize: "20px",
+      color: "#000000",
+      fontStyle: "bold",
+    })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(2002);
+    
+    // Current value display
+    const currentValue = logicComp.type === "battery" ? logicComp.voltage : logicComp.ohm;
+    const unit = logicComp.type === "battery" ? "V" : "Ω";
+    
+    const valueText = this.add.text(width / 2, height / 2 - 30, `Trenutna vrednost: ${currentValue}${unit}`, {
+      fontSize: "16px",
+      color: "#333333",
+    })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(2002);
+    
+    // Input instruction
+    const instructionText = this.add.text(width / 2, height / 2 + 5, `Vnesi novo vrednost (${unit}):`, {
+      fontSize: "14px",
+      color: "#666666",
+    })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(2002);
+    
+    // Create HTML input element
+    const inputElement = document.createElement('input');
+    inputElement.type = 'number';
+    inputElement.step = logicComp.type === "battery" ? '0.1' : '0.5';
+    inputElement.min = '0.1';
+    inputElement.max = logicComp.type === "battery" ? '12' : '100';
+    inputElement.value = currentValue;
+    inputElement.style.position = 'absolute';
+    inputElement.style.left = '50%';
+    inputElement.style.top = '50%';
+    inputElement.style.transform = 'translate(-50%, -50%)';
+    inputElement.style.width = '200px';
+    inputElement.style.padding = '10px';
+    inputElement.style.fontSize = '18px';
+    inputElement.style.border = '2px solid #3399ff';
+    inputElement.style.borderRadius = '5px';
+    inputElement.style.textAlign = 'center';
+    inputElement.style.zIndex = '3000';
+    document.body.appendChild(inputElement);
+    inputElement.focus();
+    inputElement.select();
+    
+    // Prevent clicks on input from closing dialog
+    inputElement.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+    });
+    inputElement.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+    
+    // OK Button
+    const okButton = this.add.rectangle(width / 2 - 60, height / 2 + 70, 100, 40, 0x3399ff)
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(2002)
+      .setInteractive({ useHandCursor: true });
+    
+    const okText = this.add.text(width / 2 - 60, height / 2 + 70, "Potrdi", {
+      fontSize: "16px",
+      color: "#ffffff",
+      fontStyle: "bold",
+    })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(2003);
+    
+    // Cancel Button
+    const cancelButton = this.add.rectangle(width / 2 + 60, height / 2 + 70, 100, 40, 0xcc0000)
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(2002)
+      .setInteractive({ useHandCursor: true });
+    
+    const cancelText = this.add.text(width / 2 + 60, height / 2 + 70, "Prekliči", {
+      fontSize: "16px",
+      color: "#ffffff",
+      fontStyle: "bold",
+    })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(2003);
+    
+    const closeDialog = () => {
+      overlay.destroy();
+      dialog.destroy();
+      titleText.destroy();
+      valueText.destroy();
+      instructionText.destroy();
+      okButton.destroy();
+      okText.destroy();
+      cancelButton.destroy();
+      cancelText.destroy();
+      inputElement.remove();
+    };
+    
+    okButton.on('pointerdown', () => {
+      const newValue = parseFloat(inputElement.value);
+      if (!isNaN(newValue) && newValue > 0) {
+        if (logicComp.type === "battery") {
+          logicComp.voltage = newValue;
+          const label = component.getData("valueLabel");
+          if (label) label.setText(`${newValue.toFixed(1)}V`);
+        } else {
+          logicComp.ohm = newValue;
+          const label = component.getData("valueLabel");
+          if (label) label.setText(`${newValue.toFixed(1)}Ω`);
+        }
+        this.rebuildGraph();
+      }
+      closeDialog();
+    });
+    
+    cancelButton.on('pointerdown', closeDialog);
+    overlay.on('pointerdown', closeDialog);
+    
+    // Enter key to submit
+    inputElement.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        okButton.emit('pointerdown');
+      } else if (e.key === 'Escape') {
+        closeDialog();
+      }
+    });
   }
 
   checkCircuit() {
