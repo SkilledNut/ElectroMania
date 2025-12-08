@@ -1625,7 +1625,8 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.theoryBack = this.add
       .rectangle(width / 2, height / 2, width - 100, 150, 0x000000, 0.8)
       .setOrigin(0.5)
-      .setDepth(10);
+      .setDepth(10)
+      .setScrollFactor(0);
 
     this.theoryText = this.add
       .text(width / 2, height / 2, theoryText, {
@@ -1636,7 +1637,8 @@ export default class WorkspaceScene extends Phaser.Scene {
         wordWrap: { width: width - 150 },
       })
       .setOrigin(0.5)
-      .setDepth(11);
+      .setDepth(11)
+      .setScrollFactor(0);
 
     this.continueButton = this.add
       .text(width / 2, height / 2 + 70, "Nadaljuj", {
@@ -1647,6 +1649,7 @@ export default class WorkspaceScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setDepth(11)
+      .setScrollFactor(0)
       .setInteractive({ useHandCursor: true })
       .on("pointerover", () =>
         this.continueButton.setStyle({ color: "#0044cc" })
@@ -1713,15 +1716,10 @@ export default class WorkspaceScene extends Phaser.Scene {
       }
     });
 
-    // Zoom with mouse wheel
+    // Disable mouse wheel scrolling/zooming
     this.input.on("wheel", (pointer, gameObjects, deltaX, deltaY, deltaZ) => {
-      const zoomAmount = deltaY > 0 ? -0.1 : 0.1;
-      const newZoom = Phaser.Math.Clamp(
-        this.cameras.main.zoom + zoomAmount,
-        0.5,
-        2
-      );
-      this.cameras.main.setZoom(newZoom);
+      // Mouse wheel disabled - do nothing
+      return;
     });
   }
 

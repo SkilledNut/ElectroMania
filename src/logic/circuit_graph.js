@@ -134,18 +134,18 @@ class CircuitGraph {
   /**
    * Find all complete paths from battery positive to battery negative
    * Returns array of paths, where each path is array of component IDs
+   * For multiple batteries, finds paths through all battery combinations
    */
   findCircuitPaths() {
-    // Find the battery
-    const battery = this.components.find((c) => c.type === "battery");
-    if (!battery) {
+    // Find all batteries
+    const batteries = this.components.filter((c) => c.type === "battery");
+    if (batteries.length === 0) {
       console.log("[Graph] No battery found");
       return [];
     }
 
-    console.log("[Graph] Finding paths from battery", battery.id);
-    console.log("[Graph] Battery terminals:", battery.start, battery.end);
-
+    console.log(`[Graph] Found ${batteries.length} battery/batteries`);
+    
     // Build connection map
     const connectionMap = this.buildConnectionMap();
 
@@ -163,77 +163,109 @@ class CircuitGraph {
       );
     }
 
-    // BFS from battery start to battery end
-    const startKey = this.posKey(battery.start.x, battery.start.y);
-    const targetKey = this.posKey(battery.end.x, battery.end.y);
-
-    console.log("[Graph] Searching from", startKey, "to", targetKey);
-
+    // Find paths for each battery (or through multiple batteries)
     const allPaths = [];
-    const queue = [
-      {
-        posKey: startKey,
-        visited: new Set(),
-        path: [],
-      },
-    ];
+    
+    for (const battery of batteries) {
+      // BFS from battery start to battery end
+      const startKey = this.posKey(battery.start.x, battery.start.y);
+      const targetKey = this.posKey(battery.end.x, battery.end.y);
 
-    let iterations = 0;
-    const MAX_ITERATIONS = 10000;
+      console.log(`[Graph] Searching paths for battery ${battery.id} from`, startKey, "to", targetKey);
 
-    while (queue.length > 0 && iterations < MAX_ITERATIONS) {
-      iterations++;
-      const { posKey, visited, path } = queue.shift();
+      const queue = [
+        {
+          posKey: startKey,
+          visited: new Set(),
+          path: [],
+          batteriesInPath: [battery], // Track batteries in this path
+        },
+      ];
 
-      // Check if we reached the target
-      if (posKey === targetKey && path.length > 0) {
-        console.log(
-          "[Graph] ✓ Found complete path:",
-          path.map((c) => `${c.type}(${c.id})`).join(" -> ")
-        );
-        allPaths.push(path);
-        continue;
-      }
+      let iterations = 0;
+      const MAX_ITERATIONS = 10000;
 
-      // Get all terminals at this position
-      const terminals = connectionMap.get(posKey) || [];
+      while (queue.length > 0 && iterations < MAX_ITERATIONS) {
+        iterations++;
+        const { posKey, visited, path, batteriesInPath } = queue.shift();
 
-      for (const { component, terminal } of terminals) {
-        // Skip if already visited this component
-        if (visited.has(component.id)) continue;
-
-        // Skip non-conductive components
-        if (!this.isConductive(component)) {
+        // Check if we reached the target
+        if (posKey === targetKey && path.length > 0) {
           console.log(
-            `[Graph]   Skip ${component.type}(${component.id}) - not conductive`
+            "[Graph] ✓ Found complete path:",
+            path.map((c) => `${c.type}(${c.id})`).join(" -> ")
           );
+          allPaths.push({ path, batteries: batteriesInPath });
           continue;
         }
 
-        // Traverse to the other end of this component
-        const otherTerminal = terminal === "start" ? "end" : "start";
-        const nextPos = component[otherTerminal];
-        const nextPosKey = this.posKey(nextPos.x, nextPos.y);
+        // Get all terminals at this position
+        const terminals = connectionMap.get(posKey) || [];
 
-        // Create new state for this path
-        const newVisited = new Set(visited);
-        newVisited.add(component.id);
-        const newPath = [...path, component];
+        for (const { component, terminal } of terminals) {
+          // Skip if already visited this component
+          if (visited.has(component.id)) continue;
 
-        console.log(
-          `[Graph]   Traverse ${component.type}(${component.id}) from ${posKey} to ${nextPosKey}`
-        );
+          // Handle batteries specially - they can be in series
+          if (component.type === "battery") {
+            // If this is a different battery, we can include it (series connection)
+            if (component.id !== battery.id) {
+              const otherTerminal = terminal === "start" ? "end" : "start";
+              const nextPos = component[otherTerminal];
+              const nextPosKey = this.posKey(nextPos.x, nextPos.y);
 
-        queue.push({
-          posKey: nextPosKey,
-          visited: newVisited,
-          path: newPath,
-        });
+              const newVisited = new Set(visited);
+              newVisited.add(component.id);
+              const newBatteries = [...batteriesInPath, component];
+
+              console.log(
+                `[Graph]   Adding battery ${component.id} in series (total: ${newBatteries.length})`
+              );
+
+              queue.push({
+                posKey: nextPosKey,
+                visited: newVisited,
+                path: path,
+                batteriesInPath: newBatteries,
+              });
+            }
+            continue;
+          }
+
+          // Skip non-conductive components
+          if (!this.isConductive(component)) {
+            console.log(
+              `[Graph]   Skip ${component.type}(${component.id}) - not conductive`
+            );
+            continue;
+          }
+
+          // Traverse to the other end of this component
+          const otherTerminal = terminal === "start" ? "end" : "start";
+          const nextPos = component[otherTerminal];
+          const nextPosKey = this.posKey(nextPos.x, nextPos.y);
+
+          // Create new state for this path
+          const newVisited = new Set(visited);
+          newVisited.add(component.id);
+          const newPath = [...path, component];
+
+          console.log(
+            `[Graph]   Traverse ${component.type}(${component.id}) from ${posKey} to ${nextPosKey}`
+          );
+
+          queue.push({
+            posKey: nextPosKey,
+            visited: newVisited,
+            path: newPath,
+            batteriesInPath: batteriesInPath,
+          });
+        }
       }
-    }
 
-    if (iterations >= MAX_ITERATIONS) {
-      console.warn("[Graph] Max iterations reached in BFS");
+      if (iterations >= MAX_ITERATIONS) {
+        console.warn("[Graph] Max iterations reached in BFS");
+      }
     }
 
     console.log(`[Graph] Found ${allPaths.length} complete circuit path(s)`);
@@ -249,57 +281,167 @@ class CircuitGraph {
   }
 
   /**
-   * Check if a voltmeter is properly connected to the circuit
+   * Calculate voltage across a voltmeter
+   * Voltmeters measure the voltage drop between their terminals
    */
-  isVoltmeterConnected(voltmeter) {
-    // Build connection map to check if voltmeter terminals touch other components
+  calculateVoltmeterReading(voltmeter, paths, measurements) {
+    if (paths.length === 0 || !measurements) {
+      return 0;
+    }
+
     const connectionMap = this.buildConnectionMap();
-    
     const startKey = this.posKey(voltmeter.start.x, voltmeter.start.y);
     const endKey = this.posKey(voltmeter.end.x, voltmeter.end.y);
     
     const startTerminals = connectionMap.get(startKey) || [];
     const endTerminals = connectionMap.get(endKey) || [];
     
-    // Check if at least one other component (not the voltmeter itself) is at each terminal
+    // Check if voltmeter is connected to other components
     const startHasConnection = startTerminals.some(t => t.component.id !== voltmeter.id);
     const endHasConnection = endTerminals.some(t => t.component.id !== voltmeter.id);
     
-    return startHasConnection && endHasConnection;
+    if (!startHasConnection || !endHasConnection) {
+      return 0;
+    }
+
+    // Find components between the voltmeter terminals in the circuit path
+    const firstPath = paths[0];
+    const pathComponents = firstPath.path || firstPath;
+    
+    // Check if voltmeter is measuring across a specific component
+    const componentsAtStart = startTerminals
+      .filter(t => t.component.id !== voltmeter.id && t.component.type !== "voltmeter")
+      .map(t => t.component);
+    
+    const componentsAtEnd = endTerminals
+      .filter(t => t.component.id !== voltmeter.id && t.component.type !== "voltmeter")
+      .map(t => t.component);
+
+    // If measuring across a single component (resistor, bulb, etc.)
+    const measuredComponents = componentsAtStart.filter(comp => 
+      componentsAtEnd.some(endComp => endComp.id === comp.id)
+    );
+
+    if (measuredComponents.length > 0) {
+      // Calculate voltage drop across the measured component
+      const comp = measuredComponents[0];
+      let resistance = 0;
+      
+      if (comp.type === "resistor") {
+        resistance = comp.originalComponent?.ohm || 1.5;
+      } else if (comp.type === "bulb") {
+        resistance = 1;
+      } else if (comp.type === "ammeter") {
+        resistance = 0.01;
+      } else if (comp.type === "battery") {
+        // Measuring across a battery shows its voltage
+        return comp.originalComponent?.voltage || 3.3;
+      }
+
+      // V = I * R
+      const voltageDrop = measurements.current * resistance;
+      console.log(`[Graph] Voltmeter measuring ${voltageDrop.toFixed(2)}V across ${comp.type}(${comp.id})`);
+      return voltageDrop;
+    }
+
+    // If connected in parallel to the circuit, show total voltage
+    console.log(`[Graph] Voltmeter measuring total circuit voltage: ${measurements.totalVoltage.toFixed(2)}V`);
+    return measurements.totalVoltage;
+  }
+
+  /**
+   * Detect if batteries are connected in parallel
+   * Parallel batteries have the same start and end connection points
+   */
+  detectParallelBatteries(paths) {
+    const allBatteries = this.components.filter(c => c.type === "battery");
+    if (allBatteries.length <= 1) {
+      return { inParallel: false, parallelGroups: [] };
+    }
+
+    // Group batteries by their connection points
+    const batteryGroups = new Map();
+    
+    for (const battery of allBatteries) {
+      const startKey = this.posKey(battery.start.x, battery.start.y);
+      const endKey = this.posKey(battery.end.x, battery.end.y);
+      const groupKey = `${startKey}-${endKey}`;
+      
+      if (!batteryGroups.has(groupKey)) {
+        batteryGroups.set(groupKey, []);
+      }
+      batteryGroups.get(groupKey).push(battery);
+    }
+
+    // Find groups with multiple batteries (parallel configuration)
+    const parallelGroups = Array.from(batteryGroups.values()).filter(group => group.length > 1);
+    
+    if (parallelGroups.length > 0) {
+      console.log(`[Graph] Detected ${parallelGroups.length} parallel battery group(s):`);
+      parallelGroups.forEach((group, idx) => {
+        console.log(`  Group ${idx + 1}: ${group.length} batteries in parallel (${group.map(b => b.id).join(', ')})`);
+      });
+    }
+
+    return {
+      inParallel: parallelGroups.length > 0,
+      parallelGroups: parallelGroups
+    };
   }
 
   /**
    * Calculate circuit measurements (voltage and current)
+   * For multiple batteries in series, voltages add up
+   * For batteries in parallel, voltage stays the same
    */
   calculateMeasurements(paths) {
-    const battery = this.components.find((c) => c.type === "battery");
-    if (!battery || paths.length === 0) {
-      return { voltage: 0, current: 0 };
+    if (paths.length === 0) {
+      return { voltage: 0, current: 0, totalVoltage: 0 };
     }
 
-    // Get actual battery voltage from the component
-    const batteryVoltage = battery.originalComponent?.voltage || 3.3;
+    // Detect parallel batteries
+    const parallelInfo = this.detectParallelBatteries(paths);
+
+    // Use the first complete path to calculate measurements
+    const firstPath = paths[0];
+    const pathComponents = firstPath.path || firstPath;
+    const batteriesInPath = firstPath.batteries || [this.components.find((c) => c.type === "battery")];
+
+    // Calculate total voltage
+    let totalVoltage = 0;
+    
+    if (parallelInfo.inParallel && parallelInfo.parallelGroups.length > 0) {
+      // For parallel batteries, voltage is the same (use the first battery's voltage)
+      // In reality, all parallel batteries should have the same voltage
+      const firstParallelGroup = parallelInfo.parallelGroups[0];
+      const voltage = firstParallelGroup[0].originalComponent?.voltage || 3.3;
+      totalVoltage = voltage;
+      console.log(`[Graph] ${firstParallelGroup.length} batteries in PARALLEL: voltage = ${voltage}V (same as single battery)`);
+    } else {
+      // For series batteries, voltages add up
+      for (const battery of batteriesInPath) {
+        const voltage = battery.originalComponent?.voltage || 3.3;
+        totalVoltage += voltage;
+        console.log(`[Graph] Battery ${battery.id} contributes ${voltage}V`);
+      }
+      console.log(`[Graph] Total voltage from ${batteriesInPath.length} battery/batteries in SERIES: ${totalVoltage}V`);
+    }
 
     // Calculate total resistance in the circuit
     let totalResistance = 0;
     
-    if (paths.length > 0) {
-      // Use the first complete path to calculate resistance
-      const path = paths[0];
-      
-      for (const comp of path) {
-        if (comp.type === "resistor") {
-          // Get actual resistance value from the component
-          totalResistance += comp.originalComponent?.ohm || 1.5;
-        } else if (comp.type === "bulb") {
-          // Bulbs have approximately 1Ω resistance
-          totalResistance += 1;
-        } else if (comp.type === "ammeter") {
-          // Ammeters have negligible resistance (0.01Ω)
-          totalResistance += 0.01;
-        }
-        // Wires and switches have negligible resistance
+    for (const comp of pathComponents) {
+      if (comp.type === "resistor") {
+        // Get actual resistance value from the component
+        totalResistance += comp.originalComponent?.ohm || 1.5;
+      } else if (comp.type === "bulb") {
+        // Bulbs have approximately 1Ω resistance
+        totalResistance += 1;
+      } else if (comp.type === "ammeter") {
+        // Ammeters have negligible resistance (0.01Ω)
+        totalResistance += 0.01;
       }
+      // Wires and switches have negligible resistance
     }
 
     // Ensure minimum resistance to avoid division by zero
@@ -308,11 +450,16 @@ class CircuitGraph {
     }
 
     // Using Ohm's law: I = V / R
-    const current = batteryVoltage / totalResistance;
+    const current = totalVoltage / totalResistance;
+
+    console.log(`[Graph] Total resistance: ${totalResistance.toFixed(2)}Ω`);
+    console.log(`[Graph] Current: ${current.toFixed(2)}A`);
 
     return {
-      voltage: batteryVoltage,
+      voltage: totalVoltage, // Total voltage across the circuit
       current: current,
+      totalVoltage: totalVoltage, // For clarity
+      parallelBatteries: parallelInfo.inParallel,
     };
   }
 
@@ -338,21 +485,22 @@ class CircuitGraph {
     // Update ammeters - they show current if in a complete path
     const ammeters = this.components.filter((c) => c.type === "ammeter");
     for (const ammeter of ammeters) {
-      const isInPath = paths.some(path => 
-        path.some(comp => comp.id === ammeter.id)
-      );
+      // Check if ammeter is in any path
+      const isInPath = paths.some(pathObj => {
+        const pathComponents = pathObj.path || pathObj;
+        return pathComponents.some(comp => comp.id === ammeter.id);
+      });
       if (ammeter.originalComponent) {
         ammeter.originalComponent.current = isInPath && isComplete ? measurements.current : 0;
       }
     }
 
-    // Update voltmeters - check if both terminals are connected to circuit components
+    // Update voltmeters - calculate voltage based on what they're measuring
     const voltmeters = this.components.filter((c) => c.type === "voltmeter");
     for (const voltmeter of voltmeters) {
       if (voltmeter.originalComponent) {
-        // Check if voltmeter terminals are connected to other components
-        const isConnected = this.isVoltmeterConnected(voltmeter);
-        voltmeter.originalComponent.voltage = isConnected && isComplete ? measurements.voltage : 0;
+        const voltage = isComplete ? this.calculateVoltmeterReading(voltmeter, paths, measurements) : 0;
+        voltmeter.originalComponent.voltage = voltage;
       }
     }
 
@@ -361,8 +509,8 @@ class CircuitGraph {
       `[Graph] ${bulbs.length} bulb(s) turned ${isComplete ? "ON" : "OFF"}`
     );
 
-    const battery = this.components.find((c) => c.type === "battery");
-    if (!battery) {
+    const batteries = this.components.filter((c) => c.type === "battery");
+    if (batteries.length === 0) {
       console.log("[Graph] No battery found, circuit is OPEN");
       return { status: -1, paths: [] };
     }
@@ -370,14 +518,14 @@ class CircuitGraph {
     if (isComplete) {
       console.log(`[Graph] Circuit is COMPLETE`);
       console.log(`[Graph] ${bulbs.length} bulb(s) turned ON`);
-      return { status: 1, paths: paths };
+      console.log(`[Graph] Measurements: ${measurements.current.toFixed(2)}A, ${measurements.voltage.toFixed(2)}V`);
+      return { status: 1, paths: paths, measurements: measurements };
     }
 
     const hasSwitch = this.components.some((c) => c.type === "switch");
     const anySwitchOff = this.components.some(
       (c) => c.type === "switch" && c.is_on === false
     );
-    console.log(`[Graph] Measurements: ${measurements.current.toFixed(2)}A, ${measurements.voltage.toFixed(2)}V`);
 
     if (hasSwitch && anySwitchOff) {
       console.log("[Graph] Circuit OPEN due to switch being OFF");

@@ -43,4 +43,13 @@ const config = {
 
 // inicializacija igre
 const game = new Phaser.Game(config);
+
+// Disable scrolling on the game canvas
+window.addEventListener('wheel', (e) => {
+  // Check if the event target is the game canvas or within the game container
+  if (e.target.tagName === 'CANVAS' || e.target.closest('#game-container')) {
+    e.preventDefault();
+  }
+}, { passive: false });
+
 export default game;
