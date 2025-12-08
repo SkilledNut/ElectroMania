@@ -9,6 +9,7 @@ import { Switch } from "../components/switch";
 import { Resistor } from "../components/resistor";
 import { Ammeter } from "../components/ammeter";
 import { Voltmeter } from "../components/voltmeter";
+import { config } from "../config";
 
 export default class WorkspaceScene extends Phaser.Scene {
   constructor() {
@@ -27,6 +28,100 @@ export default class WorkspaceScene extends Phaser.Scene {
     // Infinite canvas settings for both modes
     this.canvasWidth = 10000;
     this.canvasHeight = 10000;
+    
+    // Current challenge (will be populated from API)
+    this.currentChallenge = null;
+    this.challengeLoaded = false;
+  }
+
+  async fetchCurrentChallenge() {
+    try {
+      const token = localStorage.getItem("token");
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      // Fetch single challenge by index (the API accepts order index as id)
+      const response = await fetch(`${config.API_URL}/challenges/${this.currentChallengeIndex}`, { headers });
+      
+      if (response.status === 404) {
+        // No more challenges - user completed all
+        this.currentChallenge = null;
+        this.challengeLoaded = true;
+        if (this.promptText) {
+          this.promptText.setText("Vse naloge so uspešno opravljene! Čestitke!");
+        }
+        if (this.missingText) {
+          this.missingText.setText("");
+        }
+        console.log('[WorkspaceScene] All challenges completed!');
+        return;
+      }
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch challenge');
+      }
+      
+      const challenge = await response.json();
+      this.currentChallenge = challenge;
+      this.challengeLoaded = true;
+      
+      // Update prompt text if in challenge mode
+      if (this.mode === 'challenge' && this.promptText && this.currentChallenge) {
+        this.promptText.setText(this.currentChallenge.prompt);
+        this.updateMissingLabel();
+      }
+      
+      console.log('[WorkspaceScene] Loaded challenge:', this.currentChallenge.prompt);
+    } catch (error) {
+      console.error('[WorkspaceScene] Error fetching challenge:', error);
+      this.currentChallenge = null;
+      this.challengeLoaded = true;
+      if (this.promptText) {
+        this.promptText.setText("Napaka pri nalaganju naloge.");
+      }
+    }
+  }
+
+  async completeCurrentChallenge(score = 10) {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        console.warn('[WorkspaceScene] No token, cannot complete challenge on server');
+        return;
+      }
+      
+      if (!this.currentChallenge || !this.currentChallenge._id) {
+        console.warn('[WorkspaceScene] No valid challenge to complete');
+        return;
+      }
+      
+      const response = await fetch(`${config.API_URL}/challenges/${this.currentChallenge._id}/complete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ score })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to complete challenge');
+      }
+      
+      const result = await response.json();
+      console.log('[WorkspaceScene] Challenge completed:', result);
+      
+      // Update local storage with server's currentChallengeIndex
+      if (result.currentChallengeIndex !== undefined) {
+        localStorage.setItem("currentChallengeIndex", result.currentChallengeIndex.toString());
+      }
+    } catch (error) {
+      console.error('[WorkspaceScene] Error completing challenge:', error);
+    }
   }
 
   preload() {
@@ -111,84 +206,10 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.infoWindow.add([infoBox, infoText]);
     this.infoText = infoText;
 
-    this.challenges = [
-      {
-        prompt: "Sestavi preprosti električni krog z baterijo in svetilko.",
-        requiredComponents: [
-          "baterija",
-          "svetilka",
-          "žica",
-          "žica",
-          "žica",
-          "žica",
-          "žica",
-          "žica",
-        ],
-        theory: [
-          "Osnovni električni krog potrebuje vir, to je v našem primeru baterija. Potrebuje tudi porabnike, to je svetilka. Električni krog je v našem primeru sklenjen, kar je nujno potrebno, da električni tok teče preko prevodnikov oziroma žic.",
-        ],
-      },
-      {
-        prompt:
-          "Sestavi preprosti nesklenjeni električni krog z baterijo, svetilko in stikalom.",
-        requiredComponents: ["baterija", "svetilka", "žica", "stikalo"],
-        theory: [
-          "V nesklenjenem krogu je stikalo odprto, kar pomeni, da je električni tok prekinjen. Svetilka posledično zato ne sveti.",
-        ],
-      },
-      {
-        prompt:
-          "Sestavi preprosti sklenjeni električni krog z baterijo, svetilko in stikalom.",
-        requiredComponents: ["baterija", "svetilka", "žica", "stikalo"],
-        theory: [
-          "V sklenjenem krogu je stikalo zaprto, kar pomeni, da lahko električni tok teče neovirano. Torej v tem primeru so vrata zaprta.",
-        ],
-      },
-      {
-        prompt:
-          "Sestavi električni krog z baterijo, svetilko in stikalom, ki ga lahko ugašaš in prižigaš.",
-        requiredComponents: [
-          "baterija",
-          "svetilka",
-          "žica",
-          "stikalo",
-        ],
-        theory: [
-          "Stikalo nam omogoča nadzor nad pretokom električnega toka. Ko je stikalo zaprto, tok teče in posledično svetilka sveti. Kadar pa je stikalo odprto, tok ne teče in se svetilka ugasne. To lahko primerjamo z vklapljanjem in izklapljanjem električnih naprav v naših domovih.",
-        ],
-      },
-      {
-        prompt: "Sestavi krog z dvema baterijama in svetilko. ",
-        requiredComponents: ["baterija", "baterija", "svetilka", "žica"],
-        theory: [
-          "Kadar vežemo dve ali več baterij zaporedno, se napetosti seštevajo. Večja je napetost, večji je električni tok. V našem primeru zato svetilka sveti močneje.",
-        ],
-      },
-      {
-        prompt:
-          "V električni krog zaporedno poveži dve svetilki, ki ju priključiš na baterijo. ",
-        requiredComponents: ["baterija", "svetilka", "svetilka", "žica"],
-        theory: [
-          "V zaporedni vezavi teče isti električni tok skozi vse svetilke. Napetost baterije se porazdeli. Če imamo primer, da ena svetilka preneha delovati, bo ta prekinila tok skozi drugo svetilko.",
-        ],
-      },
-
-      {
-        prompt:
-          "V električni krog vzporedno poveži dve svetilki, ki ju priključiš na baterijo. ",
-        requiredComponents: ["baterija", "svetilka", "svetilka", "žica"],
-        theory: [
-          "V vzporedni vezavi ima vsaka svetilka enako napetost kot baterija. Eletrični tok se porazdeli med svetilkami. Če ena svetilka preneha delovati, bo druga še vedno delovala.",
-        ],
-      },
-      {
-        prompt: "Sestavi električni krog s svetilko in uporom. ",
-        requiredComponents: ["baterija", "svetilka", "žica", "upor"],
-        theory: [
-          "Upor omejuje tok v krogu. Večji kot je upor, manjši je tok. Spoznajmo Ohmov zakon: tok (I) = napetost (U) / upornost (R). Svetilka bo svetila manj intenzivno, saj skozi njo teče manjši tok.",
-        ],
-      },
-    ];
+    // Fetch current challenge from API if in challenge mode
+    if (this.mode === 'challenge') {
+      this.fetchCurrentChallenge();
+    }
 
     // this.currentChallengeIndex = 0;
 
@@ -198,7 +219,7 @@ export default class WorkspaceScene extends Phaser.Scene {
         .text(
           width / 1.8,
           height - 30,
-          this.challenges[this.currentChallengeIndex].prompt,
+          "Nalaganje nalog...",
           {
             fontSize: "20px",
             color: "#333",
@@ -475,14 +496,21 @@ export default class WorkspaceScene extends Phaser.Scene {
   }
 
   getMissingComponents() {
-    const currentChallenge = this.challenges[this.currentChallengeIndex];
+    if (!this.challengeLoaded || !this.currentChallenge) {
+      return [];
+    }
+    
+    if (!this.currentChallenge.requiredComponents) {
+      return [];
+    }
+    
     const placedTypes = this.placedComponents.map((comp) =>
       comp.getData("type")
     );
 
     const missing = [];
-    for (const required of currentChallenge.requiredComponents) {
-      const count = currentChallenge.requiredComponents.filter(
+    for (const required of this.currentChallenge.requiredComponents) {
+      const count = this.currentChallenge.requiredComponents.filter(
         (r) => r === required
       ).length;
       const placed = placedTypes.filter((p) => p === required).length;
@@ -494,6 +522,21 @@ export default class WorkspaceScene extends Phaser.Scene {
   }
 
   updateMissingLabel() {
+    if (!this.challengeLoaded) {
+      if (this.missingText) {
+        this.missingText.setText("Nalaganje naloge...");
+        this.missingText.setStyle({ color: "#666666" });
+      }
+      return;
+    }
+    
+    if (!this.currentChallenge) {
+      if (this.missingText) {
+        this.missingText.setText("");
+      }
+      return;
+    }
+    
     const missing = this.getMissingComponents();
     if (missing.length > 0) {
       this.missingText.setText("Manjkajoče: " + missing.join(", "));
@@ -592,15 +635,17 @@ export default class WorkspaceScene extends Phaser.Scene {
    * Update the label showing missing components for current challenge
    */
   updateMissingComponentsLabel() {
-    if (
-      !this.missingText ||
-      !this.challenges ||
-      this.currentChallengeIndex === undefined
-    )
+    if (!this.missingText || this.currentChallengeIndex === undefined)
       return;
 
-    const currentChallenge = this.challenges[this.currentChallengeIndex];
-    if (!currentChallenge || !currentChallenge.requiredComponents) {
+    // Handle case when challenge isn't loaded yet
+    if (!this.challengeLoaded) {
+      this.missingText.setText("Nalaganje naloge...");
+      this.missingText.setStyle({ color: "#666666" });
+      return;
+    }
+
+    if (!this.currentChallenge || !this.currentChallenge.requiredComponents) {
       this.missingText.setText("");
       return;
     }
@@ -615,7 +660,7 @@ export default class WorkspaceScene extends Phaser.Scene {
     const requiredCounts = {};
 
     // Count required components
-    for (const req of currentChallenge.requiredComponents) {
+    for (const req of this.currentChallenge.requiredComponents) {
       requiredCounts[req] = (requiredCounts[req] || 0) + 1;
     }
 
@@ -1533,7 +1578,17 @@ export default class WorkspaceScene extends Phaser.Scene {
   }
 
   checkCircuit() {
-    const currentChallenge = this.challenges[this.currentChallengeIndex];
+    // Check if challenge is loaded
+    if (!this.challengeLoaded) {
+      this.checkText.setText("Naloga se še nalaga...");
+      return;
+    }
+    
+    if (!this.currentChallenge) {
+      this.checkText.setText("Naloga ni najdena.");
+      return;
+    }
+    
     const placedTypes = this.placedComponents.map((comp) =>
       comp.getData("type")
     );
@@ -1541,7 +1596,7 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.checkText.setStyle({ color: "#cc0000" });
     // preverjas ce so vse komponente na mizi
     if (
-      !currentChallenge.requiredComponents.every((req) =>
+      !this.currentChallenge.requiredComponents.every((req) =>
         placedTypes.includes(req)
       )
     ) {
@@ -1566,9 +1621,12 @@ export default class WorkspaceScene extends Phaser.Scene {
 
     this.checkText.setStyle({ color: "#00aa00" });
     this.checkText.setText("Čestitke! Krog je pravilen.");
+    
+    // Complete the challenge on the server
+    this.completeCurrentChallenge(10);
 
-    if (currentChallenge.theory) {
-      this.showTheory(currentChallenge.theory);
+    if (this.currentChallenge.theory) {
+      this.showTheory(this.currentChallenge.theory);
     } else {
       this.checkText.setStyle({ color: "#00aa00" });
       this.checkText.setText("Čestitke! Krog je pravilen.");
@@ -1578,7 +1636,7 @@ export default class WorkspaceScene extends Phaser.Scene {
     // this.placedComponents.forEach(comp => comp.destroy());
     // this.placedComponents = [];
     // this.time.delayedCall(2000, () => this.nextChallenge());
-    // const isCorrect = currentChallenge.requiredComponents.every(req => placedTypes.includes(req));
+    // const isCorrect = this.currentChallenge.requiredComponents.every(req => placedTypes.includes(req));
     // if (isCorrect) {
     //   this.checkText.setText('Čestitke! Krog je pravilen.');
     //   this.addPoints(10);
@@ -1596,17 +1654,18 @@ export default class WorkspaceScene extends Phaser.Scene {
       this.currentChallengeIndex.toString()
     );
     this.checkText.setText("");
-
-    if (this.currentChallengeIndex < this.challenges.length) {
-      this.promptText.setText(
-        this.challenges[this.currentChallengeIndex].prompt
-      );
-      this.updateMissingLabel();
-    } else {
-      this.promptText.setText("Vse naloge so uspešno opravljene! Čestitke!");
-      this.missingText.setText("");
-      localStorage.removeItem("currentChallengeIndex");
-    }
+    
+    // Clear placed components for next challenge
+    this.placedComponents.forEach((comp) => comp.destroy());
+    this.placedComponents = [];
+    
+    // Reset challenge state and fetch next challenge from API
+    this.currentChallenge = null;
+    this.challengeLoaded = false;
+    this.promptText.setText("Nalaganje naloge...");
+    
+    // Fetch next challenge
+    this.fetchCurrentChallenge();
   }
 
   addPoints(points) {
