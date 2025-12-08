@@ -12,6 +12,14 @@ export default class WorkspaceScene extends Phaser.Scene {
   constructor() {
     super("WorkspaceScene");
     this.currentlyDraggedComponent = null;
+    this.circuitCurrent = 0;
+    this.activePlacementType = null;
+    this.activePlacementColor = null;
+    this.activePanelComponent = null;
+    this.placementPreview = null;
+    this.pendingPlacement = null;
+    this.isPlacingNewComponent = false;
+    this.previewRotation = 0;
   }
 
   init() {
@@ -27,7 +35,7 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.load.image("stikalo-on", "src/components/switch-on.png");
     this.load.image("stikalo-off", "src/components/switch-off.png");
     this.load.image("žica", "src/components/wire.png");
-    this.load.image("ampermeter", "src/components/ammeter.png");
+    this.load.image("ammeter", "src/components/ammeter.png");
     this.load.image("voltmeter", "src/components/voltmeter.png");
   }
 
@@ -243,6 +251,7 @@ export default class WorkspaceScene extends Phaser.Scene {
 
     // stranska vrstica na levi
     const panelWidth = 150;
+    this.panelWidth = panelWidth;
     this.add.rectangle(0, 0, panelWidth, height, 0xc0c0c0).setOrigin(0);
     this.add.rectangle(0, 0, panelWidth, height, 0x000000, 0.2).setOrigin(0);
 
@@ -261,7 +270,7 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.createComponent(panelWidth / 2, 340, "stikalo-on", 0x666666);
     this.createComponent(panelWidth / 2, 420, "stikalo-off", 0x666666);
     this.createComponent(panelWidth / 2, 500, "žica", 0x0066cc);
-    this.createComponent(panelWidth / 2, 580, "ampermeter", 0x00cc66);
+    this.createComponent(panelWidth / 2, 580, "ammeter", 0x00cc66);
     this.createComponent(panelWidth / 2, 660, "voltmeter", 0x00cc66);
 
     const backButton = this.add
@@ -323,40 +332,64 @@ export default class WorkspaceScene extends Phaser.Scene {
   component.setData("rotation", newRotation);
   component.setData("isRotated", !component.getData("isRotated"));
 
-  // Calculate the shortest rotation path
-  let targetAngle = newRotation;
-  const currentAngle = component.angle;
-  
-  // Normalize current angle to 0-360 range
-  const normalizedCurrent = ((currentAngle % 360) + 360) % 360;
-  
-  // Calculate both clockwise and counter-clockwise distances
-  let clockwiseDist = (targetAngle - normalizedCurrent + 360) % 360;
-  let counterClockwiseDist = (normalizedCurrent - targetAngle + 360) % 360;
-  
-  // Choose the shortest path
-  if (counterClockwiseDist < clockwiseDist) {
-    targetAngle = currentAngle - counterClockwiseDist;
-  } else {
-    targetAngle = currentAngle + clockwiseDist;
-  }
+  // Check if this is a pending placement - if so, rotate instantly
+  const isPendingPlacement = (component === this.pendingPlacement);
 
-  this.tweens.add({
-    targets: component,
-    angle: targetAngle,
-    duration: 150,
-    ease: "Cubic.easeOut",
-    onComplete: () => {
-      // Normalize the final angle to 0-360 to prevent drift
-      component.angle = newRotation;
-      this.updateLogicNodePositions(component);
-      this.rebuildGraph();
-    },
-  });
+  if (isPendingPlacement) {
+    // Instant rotation for pending placement
+    component.angle = newRotation;
+    this.updateLogicNodePositions(component);
+  } else {
+    // Calculate the shortest rotation path for placed components
+    let targetAngle = newRotation;
+    const currentAngle = component.angle;
+    
+    // Normalize current angle to 0-360 range
+    const normalizedCurrent = ((currentAngle % 360) + 360) % 360;
+    
+    // Calculate both clockwise and counter-clockwise distances
+    let clockwiseDist = (targetAngle - normalizedCurrent + 360) % 360;
+    let counterClockwiseDist = (normalizedCurrent - targetAngle + 360) % 360;
+    
+    // Choose the shortest path
+    if (counterClockwiseDist < clockwiseDist) {
+      targetAngle = currentAngle - counterClockwiseDist;
+    } else {
+      targetAngle = currentAngle + clockwiseDist;
+    }
+
+    this.tweens.add({
+      targets: component,
+      angle: targetAngle,
+      duration: 150,
+      ease: "Cubic.easeOut",
+      onComplete: () => {
+        // Normalize the final angle to 0-360 to prevent drift
+        component.angle = newRotation;
+        this.updateLogicNodePositions(component);
+        this.rebuildGraph();
+      },
+    });
+  }
 };
 
     // Setup keyboard input for rotation - Q = left, R = right
     this.input.keyboard.on("keydown-Q", () => {
+      // Prioritize preview rotation in placement mode
+      if (this.activePlacementType && !this.pendingPlacement) {
+        this.previewRotation = (this.previewRotation - 90 + 360) % 360;
+        if (this.placementPreview) {
+          this.placementPreview.setAngle(this.previewRotation);
+        }
+        return;
+      }
+
+      // Prioritize pending placement component
+      if (this.pendingPlacement) {
+        rotateComponent.call(this, this.pendingPlacement, -1);
+        return;
+      }
+
       // Prioritize currently dragged component
       const targetComponent = this.currentlyDraggedComponent;
 
@@ -382,6 +415,21 @@ export default class WorkspaceScene extends Phaser.Scene {
     });
 
     this.input.keyboard.on("keydown-R", () => {
+      // Prioritize preview rotation in placement mode
+      if (this.activePlacementType && !this.pendingPlacement) {
+        this.previewRotation = (this.previewRotation + 90) % 360;
+        if (this.placementPreview) {
+          this.placementPreview.setAngle(this.previewRotation);
+        }
+        return;
+      }
+
+      // Prioritize pending placement component
+      if (this.pendingPlacement) {
+        rotateComponent.call(this, this.pendingPlacement, 1);
+        return;
+      }
+
       // Prioritize currently dragged component
       const targetComponent = this.currentlyDraggedComponent;
 
@@ -437,7 +485,562 @@ export default class WorkspaceScene extends Phaser.Scene {
     //     this.graph.simulate();
     //   });
 
+    this.input.on("pointermove", this.handlePointerMove, this);
+    this.input.on("pointerdown", this.handlePointerDown, this);
+    this.input.on("pointerup", this.handlePointerUp, this);
+    this.input.keyboard.on("keydown-ESC", () => {
+      this.deactivatePlacementMode();
+    });
+
+    // Create grid highlight graphics
+    this.gridHighlightGraphics = this.add.graphics();
+    this.gridHighlightGraphics.setDepth(3);
+
+    // Create connection point graphics
+    this.connectionPointGraphics = this.add.graphics();
+    this.connectionPointGraphics.setDepth(4);
+
     console.log(JSON.parse(localStorage.getItem("users")));
+  }
+
+  handlePointerMove(pointer) {
+    this.updatePlacementPreview(pointer);
+
+    if (this.isPlacingNewComponent && this.pendingPlacement) {
+      const snapped = this.snapToGrid(pointer.worldX, pointer.worldY);
+      this.pendingPlacement.x = snapped.x;
+      this.pendingPlacement.y = snapped.y;
+      this.updateLogicNodePositions(this.pendingPlacement);
+      
+      // Update grid highlights and connection points for wires
+      if (this.activePlacementType === "žica") {
+        this.updateGridHighlights(snapped.x, snapped.y);
+        this.updateConnectionPoints(snapped.x, snapped.y);
+      }
+    }
+  }
+
+  handlePointerDown(pointer, currentlyOver) {
+    if (!this.activePlacementType || !pointer.leftButtonDown()) return;
+    if (!this.isPointerOverWorkbench(pointer)) return;
+    if (this.isPlacingNewComponent || this.pendingPlacement) return;
+
+    const allowOverlapPlacement = pointer.event && (pointer.event.shiftKey || pointer.event.altKey);
+    const overWorkbenchComponent = (currentlyOver || []).some((gameObject) => {
+      const container = this.resolveComponentContainer(gameObject);
+      return container && !container.getData("isInPanel");
+    });
+
+    if (overWorkbenchComponent && !allowOverlapPlacement) return;
+
+    this.beginComponentPlacement(pointer);
+  }
+
+  handlePointerUp(pointer) {
+    if (!this.isPlacingNewComponent || !this.pendingPlacement) return;
+    if (pointer.button !== 0) {
+      this.cancelPendingPlacement();
+      this.updatePlacementPreview(pointer);
+      return;
+    }
+
+    if (!this.isPointerOverWorkbench(pointer)) {
+      this.cancelPendingPlacement();
+      this.updatePlacementPreview(pointer);
+      return;
+    }
+
+    // Check if placing a wire on top of another wire
+    if (this.activePlacementType === "žica") {
+      const snapped = this.snapToGrid(pointer.worldX, pointer.worldY);
+      const hasWireAtPosition = this.hasWireAtPosition(snapped.x, snapped.y, this.previewRotation);
+      
+      if (hasWireAtPosition) {
+        // Show visual feedback that placement is blocked
+        this.showPlacementBlockedFeedback(snapped.x, snapped.y);
+        return;
+      }
+    }
+
+    this.finalizeComponentPlacement(pointer);
+  }
+
+  togglePlacementMode(panelComponent) {
+    if (!panelComponent) return;
+
+    // Only allow placement mode for wires
+    const componentType = panelComponent.getData("type");
+    if (componentType !== "žica") return;
+
+    if (this.activePanelComponent === panelComponent) {
+      this.deactivatePlacementMode();
+    } else {
+      this.activatePlacementMode(panelComponent);
+    }
+  }
+
+  activatePlacementMode(panelComponent) {
+    if (!panelComponent) return;
+
+    this.deactivatePlacementMode();
+
+    this.activePlacementType = panelComponent.getData("type");
+    this.activePlacementColor = panelComponent.getData("color");
+    this.activePanelComponent = panelComponent;
+    this.previewRotation = 0;
+
+    this.highlightPanelComponent(panelComponent, true);
+    this.createPlacementPreview(this.activePlacementType);
+    if (this.input && this.input.activePointer) {
+      this.updatePlacementPreview(this.input.activePointer);
+    }
+  }
+
+  deactivatePlacementMode() {
+    this.cancelPendingPlacement();
+
+    if (this.activePanelComponent) {
+      this.highlightPanelComponent(this.activePanelComponent, false);
+      this.activePanelComponent = null;
+    }
+
+    this.activePlacementType = null;
+    this.activePlacementColor = null;
+
+    if (this.placementPreview) {
+      this.placementPreview.destroy();
+      this.placementPreview = null;
+    }
+
+    // Clear wire-specific visual feedback
+    this.clearGridHighlights();
+    this.clearConnectionPoints();
+  }
+
+  highlightPanelComponent(component, shouldHighlight) {
+    if (!component) return;
+
+    const image = component.getData("componentImage") || component.list?.[0];
+    if (!image) return;
+
+    if (shouldHighlight) {
+      image.setTint(0xffff99);
+    } else {
+      image.clearTint();
+    }
+  }
+
+  createPlacementPreview(type) {
+    const textureKey = this.getTextureKeyForType(type);
+    if (!textureKey) return;
+
+    if (this.placementPreview) {
+      this.placementPreview.destroy();
+      this.placementPreview = null;
+    }
+
+    this.placementPreview = this.add.image(0, 0, textureKey);
+    this.placementPreview.setOrigin(0.5);
+    this.placementPreview.setDisplaySize(100, 100);
+    this.placementPreview.setAlpha(0.35);
+    this.placementPreview.setDepth(900);
+    this.placementPreview.setVisible(false);
+  }
+
+  updatePlacementPreview(pointer) {
+    if (!this.placementPreview) return;
+
+    if (!this.activePlacementType || !this.isPointerOverWorkbench(pointer)) {
+      this.placementPreview.setVisible(false);
+      return;
+    }
+
+    const snapped = this.snapToGrid(pointer.worldX, pointer.worldY);
+    this.placementPreview.setPosition(snapped.x, snapped.y);
+    this.placementPreview.setAngle(this.previewRotation);
+    this.placementPreview.setVisible(true);
+  }
+
+  beginComponentPlacement(pointer) {
+    const snapped = this.snapToGrid(pointer.worldX, pointer.worldY);
+    const color = this.activePlacementColor ?? 0xffffff;
+
+    const component = this.createComponent(
+      snapped.x,
+      snapped.y,
+      this.activePlacementType,
+      color,
+      { isInPanel: false }
+    );
+
+    component.setAlpha(0.7);
+    if (component.input) {
+      component.input.enabled = false;
+    }
+    
+    // Apply preview rotation to the component
+    component.setAngle(this.previewRotation);
+    component.setData("rotation", this.previewRotation);
+    this.updateLogicNodePositions(component);
+    
+    // Add visual feedback for wires
+    if (this.activePlacementType === "žica") {
+      const componentImage = component.getData("componentImage") || component.list[0];
+      if (componentImage) {
+        componentImage.setTint(0x00ff00); // Green tint while placing
+      }
+    }
+    
+    this.pendingPlacement = component;
+    this.isPlacingNewComponent = true;
+
+    if (this.placementPreview) {
+      this.placementPreview.setVisible(false);
+    }
+  }
+
+  finalizeComponentPlacement(pointer) {
+    if (!this.pendingPlacement) return;
+
+    const snapped = this.snapToGrid(pointer.worldX, pointer.worldY);
+    this.pendingPlacement.x = snapped.x;
+    this.pendingPlacement.y = snapped.y;
+    if (this.pendingPlacement.input) {
+      this.pendingPlacement.input.enabled = true;
+    }
+    this.pendingPlacement.setAlpha(1);
+    this.pendingPlacement.setData("isInPanel", false);
+
+    // Remove green tint for wires
+    if (this.activePlacementType === "žica") {
+      const componentImage = this.pendingPlacement.getData("componentImage") || this.pendingPlacement.list[0];
+      if (componentImage) {
+        componentImage.clearTint();
+      }
+      // Show success feedback
+      this.showPlacementFeedback(snapped.x, snapped.y);
+    }
+
+    if (!this.placedComponents.includes(this.pendingPlacement)) {
+      this.placedComponents.push(this.pendingPlacement);
+    }
+    this.updateLogicNodePositions(this.pendingPlacement);
+    this.rebuildGraph();
+
+    this.pendingPlacement = null;
+    this.isPlacingNewComponent = false;
+
+    this.updatePlacementPreview(pointer);
+  }
+
+  cancelPendingPlacement() {
+    if (!this.pendingPlacement) return;
+
+    this.pendingPlacement.destroy();
+    this.pendingPlacement = null;
+    this.isPlacingNewComponent = false;
+  }
+
+  isPointerOverWorkbench(pointer) {
+    const boundary = Math.max(this.panelWidth ?? 0, 200);
+    return pointer.worldX >= boundary;
+  }
+
+  resolveComponentContainer(gameObject) {
+    if (!gameObject) return null;
+    if (gameObject.getData && gameObject.getData("type")) return gameObject;
+    if (gameObject.parentContainer) {
+      return this.resolveComponentContainer(gameObject.parentContainer);
+    }
+    return null;
+  }
+
+  getTextureKeyForType(type) {
+    const textureMap = {
+      baterija: "baterija",
+      upor: "upor",
+      svetilka: "svetilka",
+      "stikalo-on": "stikalo-on",
+      "stikalo-off": "stikalo-off",
+      "žica": "žica",
+      ammeter: "ammeter",
+      voltmeter: "voltmeter",
+    };
+    return textureMap[type] || null;
+  }
+
+  handlePanelComponentPointerUp(component, pointer) {
+    if (!component) return;
+
+    // Check if this was a drag or a click
+    const dragStartX = component.getData("dragStartX");
+    const dragStartY = component.getData("dragStartY");
+    
+    // If drag start position is set, check if component actually moved
+    if (dragStartX !== undefined && dragStartY !== undefined) {
+      const dx = Math.abs(component.x - dragStartX);
+      const dy = Math.abs(component.y - dragStartY);
+      const totalMove = Math.hypot(dx, dy);
+      
+      // If moved more than threshold, it was a drag, not a click
+      if (totalMove > 10) {
+        return;
+      }
+    }
+
+    const clickDuration =
+      (pointer.upTime || this.time.now) - (pointer.downTime || 0);
+    const dx = (pointer.downX || 0) - (pointer.x || 0);
+    const dy = (pointer.downY || 0) - (pointer.y || 0);
+    const moved = Math.hypot(dx, dy);
+
+    const CLICK_MS_THRESHOLD = 300;
+    const MOVE_PX_THRESHOLD = 10;
+
+    if (clickDuration <= CLICK_MS_THRESHOLD && moved <= MOVE_PX_THRESHOLD) {
+      // If clicking a different component than wire, exit placement mode first
+      const componentType = component.getData("type");
+      if (componentType !== "žica" && this.activePlacementType) {
+        this.deactivatePlacementMode();
+        return;
+      }
+      
+      this.togglePlacementMode(component);
+    }
+  }
+
+  /**
+   * Highlight the grid cell where the wire will be placed
+   */
+  updateGridHighlights(x, y) {
+    this.clearGridHighlights();
+    
+    if (!this.gridHighlightGraphics) return;
+
+    // Check if there's already a wire at this position with current rotation
+    const hasWire = this.hasWireAtPosition(x, y, this.previewRotation);
+    const color = hasWire ? 0xff0000 : 0x00ff00; // Red if blocked, green if available
+    const alpha = hasWire ? 0.9 : 0.8;
+    const fillAlpha = hasWire ? 0.25 : 0.15;
+
+    // Draw a highlighted grid cell
+    this.gridHighlightGraphics.clear();
+    this.gridHighlightGraphics.lineStyle(3, color, alpha);
+    this.gridHighlightGraphics.fillStyle(color, fillAlpha);
+    
+    const halfGrid = this.gridSize / 2;
+    
+    // Highlight the wire span based on rotation
+    const rotation = this.previewRotation || 0;
+    const angle = rotation % 180;
+    
+    if (angle === 0 || angle === 180) {
+      // Horizontal wire - highlight 2 cells wide
+      this.gridHighlightGraphics.fillRect(
+        x - this.gridSize,
+        y - halfGrid,
+        this.gridSize * 2,
+        this.gridSize
+      );
+      this.gridHighlightGraphics.strokeRect(
+        x - this.gridSize,
+        y - halfGrid,
+        this.gridSize * 2,
+        this.gridSize
+      );
+    } else {
+      // Vertical wire - highlight 2 cells tall
+      this.gridHighlightGraphics.fillRect(
+        x - halfGrid,
+        y - this.gridSize,
+        this.gridSize,
+        this.gridSize * 2
+      );
+      this.gridHighlightGraphics.strokeRect(
+        x - halfGrid,
+        y - this.gridSize,
+        this.gridSize,
+        this.gridSize * 2
+      );
+    }
+  }
+
+  /**
+   * Clear grid highlights
+   */
+  clearGridHighlights() {
+    if (this.gridHighlightGraphics) {
+      this.gridHighlightGraphics.clear();
+    }
+  }
+
+  /**
+   * Show connection points of nearby components
+   */
+  updateConnectionPoints(x, y) {
+    this.clearConnectionPoints();
+    
+    if (!this.connectionPointGraphics) return;
+
+    this.connectionPointGraphics.clear();
+    const snapRadius = this.gridSize * 1.5;
+
+    // Find nearby components and highlight their connection points
+    for (const component of this.placedComponents) {
+      if (component === this.selectedWire) continue;
+
+      const logicComp = component.getData("logicComponent");
+      if (!logicComp) continue;
+
+      // Check if component is nearby
+      const dx = Math.abs(component.x - x);
+      const dy = Math.abs(component.y - y);
+      const distance = Math.hypot(dx, dy);
+
+      if (distance < snapRadius) {
+        // Highlight start point
+        if (logicComp.start) {
+          this.connectionPointGraphics.fillStyle(0xff9900, 0.8);
+          this.connectionPointGraphics.fillCircle(
+            logicComp.start.x,
+            logicComp.start.y,
+            8
+          );
+          this.connectionPointGraphics.lineStyle(2, 0xffffff, 1);
+          this.connectionPointGraphics.strokeCircle(
+            logicComp.start.x,
+            logicComp.start.y,
+            8
+          );
+        }
+
+        // Highlight end point
+        if (logicComp.end) {
+          this.connectionPointGraphics.fillStyle(0xff9900, 0.8);
+          this.connectionPointGraphics.fillCircle(
+            logicComp.end.x,
+            logicComp.end.y,
+            8
+          );
+          this.connectionPointGraphics.lineStyle(2, 0xffffff, 1);
+          this.connectionPointGraphics.strokeCircle(
+            logicComp.end.x,
+            logicComp.end.y,
+            8
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Clear connection point highlights
+   */
+  clearConnectionPoints() {
+    if (this.connectionPointGraphics) {
+      this.connectionPointGraphics.clear();
+    }
+  }
+
+  /**
+   * Check if a wire exists at the given position
+   */
+  hasWireAtPosition(x, y, excludeRotation = null) {
+    const gridSize = this.gridSize || 40;
+    const wireLength = gridSize * 2; // Wire spans 2 grid cells (80 pixels total)
+    const wireWidth = gridSize * 0.5; // Wire thickness for collision
+    
+    for (const component of this.placedComponents) {
+      const logicComp = component.getData("logicComponent");
+      if (!logicComp || logicComp.type !== "wire") continue;
+      
+      // Get the existing wire's rotation
+      const existingRotation = component.getData("rotation") || 0;
+      const existingAngle = existingRotation % 180;
+      const existingIsHorizontal = (existingAngle === 0);
+      
+      // Get the new wire's rotation
+      const newRotation = excludeRotation !== null ? excludeRotation : 0;
+      const newAngle = newRotation % 180;
+      const newIsHorizontal = (newAngle === 0);
+      
+      const dx = Math.abs(component.x - x);
+      const dy = Math.abs(component.y - y);
+      
+      // Check if wires overlap based on their orientations
+      if (existingIsHorizontal && newIsHorizontal) {
+        // Both horizontal - check if they overlap
+        // Wires overlap if: y positions are close AND x ranges intersect
+        if (dy < wireWidth && dx < wireLength) {
+          return true;
+        }
+      } else if (!existingIsHorizontal && !newIsHorizontal) {
+        // Both vertical - check if they overlap
+        // Wires overlap if: x positions are close AND y ranges intersect
+        if (dx < wireWidth && dy < wireLength) {
+          return true;
+        }
+      } else {
+        // Different orientations (one horizontal, one vertical)
+        // They can cross, but check if they're at the exact same grid position
+        if (dx < gridSize * 0.25 && dy < gridSize * 0.25) {
+          return true; // Too close to place
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Show visual feedback when wire is placed
+   */
+  showPlacementFeedback(x, y) {
+    // Create a quick flash effect
+    const flash = this.add.circle(x, y, 30, 0x00ff00, 0.6);
+    flash.setDepth(200);
+
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      scale: 2,
+      duration: 400,
+      ease: 'Cubic.easeOut',
+      onComplete: () => {
+        flash.destroy();
+      }
+    });
+  }
+
+  /**
+   * Show visual feedback when placement is blocked
+   */
+  showPlacementBlockedFeedback(x, y) {
+    // Create a red X effect
+    const flash = this.add.circle(x, y, 30, 0xff0000, 0.7);
+    flash.setDepth(200);
+
+    // Add X mark
+    const graphics = this.add.graphics();
+    graphics.setDepth(201);
+    graphics.lineStyle(4, 0xffffff, 1);
+    graphics.beginPath();
+    graphics.moveTo(x - 15, y - 15);
+    graphics.lineTo(x + 15, y + 15);
+    graphics.moveTo(x + 15, y - 15);
+    graphics.lineTo(x - 15, y + 15);
+    graphics.strokePath();
+
+    this.tweens.add({
+      targets: [flash, graphics],
+      alpha: 0,
+      scale: 1.5,
+      duration: 500,
+      ease: 'Cubic.easeOut',
+      onComplete: () => {
+        flash.destroy();
+        graphics.destroy();
+      }
+    });
   }
 
   getComponentDetails(type) {
@@ -448,7 +1051,7 @@ export default class WorkspaceScene extends Phaser.Scene {
       "stikalo-on": "Dovoljuje pretok toka",
       "stikalo-off": "Prepreči pretok toka",
       žica: "Povezuje komponente\nKlikni za obračanje",
-      ampermeter: "Meri električni tok\nEnota: amperi (A)",
+      ammeter: "Meri električni tok\nEnota: amperi (A)",
       voltmeter: "Meri električno napetost\nEnota: volti (V)",
     };
     return details[type] || "Komponenta";
@@ -538,9 +1141,13 @@ export default class WorkspaceScene extends Phaser.Scene {
 
     // Auto-simulate and update label after rebuild
     const result = this.graph.simulate();
+    console.log('[WorkspaceScene] Simulation result:', result);
+    this.circuitCurrent = (result.measurements && result.measurements.current) || 0;
+    console.log('[WorkspaceScene] Set circuitCurrent to:', this.circuitCurrent);
     this.updateCircuitStatusLabel(result.status);
     this.updateMissingComponentsLabel();
     this.updateBulbVisuals(result.status);
+    this.updateMeasurementLabels();
     this.visualizeElectricity(result.paths);
   }
 
@@ -620,6 +1227,81 @@ export default class WorkspaceScene extends Phaser.Scene {
         this.checkText.setText("Električni tok ni sklenjen");
       }
       this.sim = false;
+    }
+  }
+
+  /**
+   * Update measurement device labels (ammeter, voltmeter)
+   */
+  updateMeasurementLabels() {
+    for (const component of this.placedComponents) {
+      const logicComp = component.getData("logicComponent");
+      if (!logicComp) continue;
+
+      // Only process measurement devices (ammeter and voltmeter)
+      if (logicComp.type !== "ammeter" && logicComp.type !== "voltmeter") {
+        // Remove any stray valueLabel from non-measurement components
+        const strayLabel = component.getData("valueLabel");
+        if (strayLabel) {
+          component.remove(strayLabel, true);
+          component.setData("valueLabel", null);
+        }
+        continue;
+      }
+
+      // Update ammeter label
+      if (logicComp.type === "ammeter") {
+        let label = component.getData("valueLabel");
+        // Check if label exists and is still active (not destroyed)
+        if (!label || !label.active) {
+          // Remove old label if it exists but is inactive
+          if (label) {
+            component.remove(label, true);
+          }
+          label = this.add.text(0, -45, "", {
+            fontSize: "14px",
+            color: "#ffffff",
+            backgroundColor: "#000000aa",
+            padding: { x: 6, y: 3 },
+            fontStyle: "bold"
+          }).setOrigin(0.5);
+          component.add(label);
+          label.setPosition(0, -45); // Ensure relative position to container
+          component.setData("valueLabel", label);
+        }
+        // Use dynamic current from circuit simulation
+        const current = this.circuitCurrent || 0;
+        console.log(`Ammeter ${logicComp.id}: circuitCurrent=${this.circuitCurrent}, displaying ${current.toFixed(2)} A`);
+        label.setText(current > 0 ? `${current.toFixed(2)} A` : "0 A");
+      }
+
+      // Update voltmeter label
+      if (logicComp.type === "voltmeter") {
+        let label = component.getData("valueLabel");
+        // Check if label exists and is still active (not destroyed)
+        if (!label || !label.active) {
+          // Remove old label if it exists but is inactive
+          if (label) {
+            component.remove(label, true);
+          }
+          label = this.add.text(0, -45, "", {
+            fontSize: "14px",
+            color: "#ffffff",
+            backgroundColor: "#000000aa",
+            padding: { x: 6, y: 3 },
+            fontStyle: "bold"
+          }).setOrigin(0.5);
+          component.add(label);
+          label.setPosition(0, -45); // Ensure relative position
+          component.setData("valueLabel", label);
+        }
+        // Get battery voltage
+        const battery = this.placedComponents.find(
+          (c) => c.getData("logicComponent")?.type === "battery"
+        );
+        const voltage = battery ? battery.getData("logicComponent").voltage : 0;
+        label.setText(this.sim ? `${voltage.toFixed(1)} V` : "0 V");
+      }
     }
   }
 
@@ -918,18 +1600,12 @@ export default class WorkspaceScene extends Phaser.Scene {
     draggedComponent.setData("rotation", targetRotation);
     draggedComponent.angle = targetAngle;
 
-    // swap logic components
-    const draggedLogic = draggedComponent.getData("logicComponent");
-    const targetLogic = targetComponent.getData("logicComponent");
-
-    draggedComponent.setData("logicComponent", targetLogic);
-    targetComponent.setData("logicComponent", draggedLogic);
-
     // Rebuild graph after swap
     this.rebuildGraph();
   }
 
-  createComponent(x, y, type, color) {
+  createComponent(x, y, type, color, options = {}) {
+    const { isInPanel = true } = options;
     const component = this.add.container(x, y);
 
     let comp = null;
@@ -1050,18 +1726,18 @@ export default class WorkspaceScene extends Phaser.Scene {
         component.add(componentImage);
         component.setData("logicComponent", comp);
         break;
-     case "ampermeter":
+     case "ammeter":
   id = "ammeter_" + this.getRandomInt(1000, 9999);
   comp = new Wire(  // Or create an Ammeter class if you need special behavior
     id,
     new Node(id + "_start", -40, 0),
     new Node(id + "_end", 40, 0)
   );
-  comp.type = "ampermeter";
+  comp.type = "ammeter";
   comp.localStart = { x: -40, y: 0 };
   comp.localEnd = { x: 40, y: 0 };
   componentImage = this.add
-    .image(0, 0, "ampermeter")
+    .image(0, 0, "ammeter")
     .setOrigin(0.5)
     .setDisplaySize(100, 100);
   component.add(componentImage);
@@ -1127,7 +1803,7 @@ case "voltmeter":
     component.setData("originalY", y);
     component.setData("type", type);
     component.setData("color", color);
-    component.setData("isInPanel", true);
+    component.setData("isInPanel", isInPanel);
     component.setData("rotation", 0);
     if (comp) component.setData("logicComponent", comp);
     if (componentImage) component.setData("componentImage", componentImage);
@@ -1141,6 +1817,11 @@ case "voltmeter":
       component.setData("dragStartX", component.x);
       component.setData("dragStartY", component.y);
       component.setData("hasSwapped", false);
+      
+      // Exit placement mode when dragging any component
+      if (this.activePlacementType) {
+        this.deactivatePlacementMode();
+      }
     });
 
     component.on("drag", (pointer, dragX, dragY) => {
@@ -1230,7 +1911,10 @@ case "voltmeter":
 
     // Toggle switches on click
     component.on("pointerup", (pointer) => {
-      if (component.getData("isInPanel")) return;
+      if (component.getData("isInPanel")) {
+        this.handlePanelComponentPointerUp(component, pointer);
+        return;
+      }
 
       // Determine click duration and movement to distinguish short click
       const clickDuration =
@@ -1257,9 +1941,13 @@ case "voltmeter":
             );
           }
 
-          
-          
           this.rebuildGraph();
+        }
+
+        // Handle battery voltage adjustment on click
+        if (logicComp && logicComp.type === "battery") {
+          const currentVoltage = logicComp.voltage || 3.3;
+          this.showVoltageDialog(logicComp, currentVoltage);
         }
       }
     });
@@ -1272,6 +1960,8 @@ case "voltmeter":
     component.on("pointerout", () => {
       component.setScale(1);
     });
+
+    return component;
   }
 
   checkCircuit() {
@@ -1417,5 +2107,158 @@ case "voltmeter":
       this.continueButton.destroy();
       this.continueButton = null;
     }
+  }
+
+  showVoltageDialog(logicComp, currentVoltage) {
+    const { width, height } = this.cameras.main;
+
+    // Semi-transparent background overlay
+    const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7)
+      .setOrigin(0.5)
+      .setDepth(2000)
+      .setScrollFactor(0);
+
+    // Dialog background
+    const dialogWidth = 400;
+    const dialogHeight = 250;
+    const dialogBg = this.add.graphics();
+    dialogBg.setDepth(2001);
+    dialogBg.setScrollFactor(0);
+    dialogBg.fillStyle(0xffffff, 1);
+    dialogBg.fillRoundedRect(width / 2 - dialogWidth / 2, height / 2 - dialogHeight / 2, dialogWidth, dialogHeight, 15);
+    dialogBg.lineStyle(3, 0x3399ff, 1);
+    dialogBg.strokeRoundedRect(width / 2 - dialogWidth / 2, height / 2 - dialogHeight / 2, dialogWidth, dialogHeight, 15);
+
+    // Title
+    const titleText = this.add.text(width / 2, height / 2 - 80, 'Nastavi napetost baterije', {
+      fontSize: '24px',
+      color: '#222',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    // Current voltage display
+    const currentText = this.add.text(width / 2, height / 2 - 40, `Trenutna napetost: ${currentVoltage.toFixed(1)} V`, {
+      fontSize: '16px',
+      color: '#666'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    // HTML Input field
+    const inputField = document.createElement('input');
+    inputField.type = 'number';
+    inputField.value = currentVoltage;
+    inputField.min = '0.1';
+    inputField.max = '100';
+    inputField.step = '0.1';
+    inputField.style.position = 'absolute';
+    inputField.style.left = `${width / 2 - 100}px`;
+    inputField.style.top = `${height / 2 - 5}px`;
+    inputField.style.width = '200px';
+    inputField.style.height = '40px';
+    inputField.style.fontSize = '18px';
+    inputField.style.textAlign = 'center';
+    inputField.style.borderRadius = '8px';
+    inputField.style.border = '2px solid #3399ff';
+    inputField.style.outline = 'none';
+    inputField.style.padding = '5px';
+    inputField.style.zIndex = '3000';
+    document.body.appendChild(inputField);
+    inputField.focus();
+
+    // Error message
+    const errorText = this.add.text(width / 2, height / 2 + 50, '', {
+      fontSize: '14px',
+      color: '#cc0000'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    // Buttons
+    const buttonWidth = 120;
+    const buttonHeight = 40;
+    const buttonY = height / 2 + 90;
+
+    // Cancel button
+    const cancelBg = this.add.graphics();
+    cancelBg.setDepth(2001).setScrollFactor(0);
+    cancelBg.fillStyle(0xcccccc, 1);
+    cancelBg.fillRoundedRect(width / 2 - buttonWidth - 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+
+    const cancelBtn = this.add.text(width / 2 - buttonWidth / 2 - 10, buttonY, 'Prekliči', {
+      fontSize: '18px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerover', () => {
+        cancelBg.clear();
+        cancelBg.fillStyle(0xaaaaaa, 1);
+        cancelBg.fillRoundedRect(width / 2 - buttonWidth - 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerout', () => {
+        cancelBg.clear();
+        cancelBg.fillStyle(0xcccccc, 1);
+        cancelBg.fillRoundedRect(width / 2 - buttonWidth - 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerdown', () => {
+        inputField.remove();
+        overlay.destroy();
+        dialogBg.destroy();
+        titleText.destroy();
+        currentText.destroy();
+        errorText.destroy();
+        cancelBg.destroy();
+        cancelBtn.destroy();
+        confirmBg.destroy();
+        confirmBtn.destroy();
+      });
+
+    // Confirm button
+    const confirmBg = this.add.graphics();
+    confirmBg.setDepth(2001).setScrollFactor(0);
+    confirmBg.fillStyle(0x3399ff, 1);
+    confirmBg.fillRoundedRect(width / 2 + 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+
+    const confirmBtn = this.add.text(width / 2 + buttonWidth / 2 + 10, buttonY, 'Potrdi', {
+      fontSize: '18px',
+      color: '#ffffff',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerover', () => {
+        confirmBg.clear();
+        confirmBg.fillStyle(0x0f5cad, 1);
+        confirmBg.fillRoundedRect(width / 2 + 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerout', () => {
+        confirmBg.clear();
+        confirmBg.fillStyle(0x3399ff, 1);
+        confirmBg.fillRoundedRect(width / 2 + 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerdown', () => {
+        const voltage = parseFloat(inputField.value);
+        if (!isNaN(voltage) && voltage > 0 && voltage <= 100) {
+          logicComp.voltage = voltage;
+          console.log(`Battery ${logicComp.id} voltage set to ${voltage}V`);
+          inputField.remove();
+          overlay.destroy();
+          dialogBg.destroy();
+          titleText.destroy();
+          currentText.destroy();
+          errorText.destroy();
+          cancelBg.destroy();
+          cancelBtn.destroy();
+          confirmBg.destroy();
+          confirmBtn.destroy();
+          this.rebuildGraph();
+        } else {
+          errorText.setText('Prosim vnesi veljavno napetost med 0.1 in 100 V');
+        }
+      });
+
+    // Allow Enter key to confirm
+    inputField.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        confirmBtn.emit('pointerdown');
+      } else if (e.key === 'Escape') {
+        cancelBtn.emit('pointerdown');
+      }
+    });
   }
 }
