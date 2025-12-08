@@ -79,3 +79,17 @@ export const getMe = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+export const getLeaderboard = async (req, res) => {
+  try {
+    const users = await User.find({})
+      .select('username points profilePic score')
+      .lean();
+
+    users.sort((a, b) => ((b.points ?? b.score ?? 0) - (a.points ?? a.score ?? 0)));
+
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};

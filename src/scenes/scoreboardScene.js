@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-
+import { config } from '../config'; // new import to call backend
 export default class ScoreboardScene extends Phaser.Scene {
     constructor() {
         super('ScoreboardScene');
@@ -85,45 +85,15 @@ export default class ScoreboardScene extends Phaser.Scene {
             color: '#222'
         }).setOrigin(0.5);
 
-        // lestvica
-        const users = JSON.parse(localStorage.getItem('users')) || [];
-        const userLoged = localStorage.getItem('username');
+        // prepare container where rows will be rendered
+        this.leaderboardStartY = panelY + 90;
+        this.leaderboardPanelX = panelX;
+        this.leaderboardPanelWidth = panelWidth;
+        this.userLogged = localStorage.getItem('username');
 
-        // HARDCODED TESTIRANJE
-        const userToUpdate = users.find(u => u.username === 'enej');
-        if (userToUpdate) {
-            userToUpdate.score = 130;
-            localStorage.setItem('users', JSON.stringify(users));
-        }
-
-        users.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-
-        users.forEach((user, index) => {
-            const y = panelY + 90 + index * 35;
-            const rank = index + 1;
-
-            // avatar
-            if (user.profilePic) {
-                this.add.image(panelX + 60, y + 15, user.profilePic)
-                    .setDisplaySize(40, 40)
-                    .setOrigin(0.5);
-            }
-
-            // mesto
-            this.add.text(panelX + 100, y + 5, `${rank}.`, { fontSize: '22px', color: '#444' });
-
-            // ime
-            const style = (user.username === userLoged)
-                ? { fontSize: '22px', color: '#0f5cad', fontStyle: 'bold' }
-                : { fontSize: '22px', color: '#222' };
-            this.add.text(panelX + 140, y + 5, user.username, style);
-
-            // točke
-            this.add.text(panelX + panelWidth - 100, y + 5, `${user.score ?? 0}`, {
-                fontSize: '22px',
-                color: '#0044cc'
-            }).setOrigin(1, 0);
-        });
+        // Load users (from backend if possible) then render
+        this.loadLeaderboard();
+        
 
         // ESC tipka
         this.input.keyboard.on('keydown-ESC', () => {
@@ -152,6 +122,74 @@ export default class ScoreboardScene extends Phaser.Scene {
                 });
         }
 
+    }
+
+    async loadLeaderboard() {
+        const token = localStorage.getItem('token');
+        let users = JSON.parse(localStorage.getItem('users')) || [];
+
+        try {
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+
+            const resp = await fetch(`${config.API_URL}/auth/leaderboard`, { headers });
+            if (resp.ok) {
+                const serverUsers = await resp.json();
+                users = serverUsers.map(u => ({
+                    username: u.username,
+                    profilePic: u.profilePic,
+                    points: u.points ?? u.score ?? 0
+                }));
+                localStorage.setItem('users', JSON.stringify(users));
+            } else {
+                console.warn('Failed to fetch leaderboard from server', await resp.text());
+            }
+        } catch (err) {
+            console.warn('Error fetching leaderboard:', err);
+        }
+
+
+        const userToUpdate = users.find(u => u.username === 'enej');
+        if (userToUpdate) {
+            userToUpdate.points = 130;
+            userToUpdate.score = 130;
+            localStorage.setItem('users', JSON.stringify(users));
+        }
+
+        users.sort((a, b) => ((b.points ?? b.score ?? 0) - (a.points ?? a.score ?? 0)));
+
+        this.renderLeaderboard(users);
+    }
+
+    renderLeaderboard(users) {
+        const panelX = this.leaderboardPanelX;
+        const panelY = this.leaderboardStartY;
+        const panelWidth = this.leaderboardPanelWidth;
+        const userLogged = this.userLogged;
+
+        users.forEach((user, index) => {
+            const y = panelY + index * 35;
+            const rank = index + 1;
+
+            if (user.profilePic) {
+                this.add.image(panelX + 60, y + 15, user.profilePic)
+                    .setDisplaySize(40, 40)
+                    .setOrigin(0.5);
+            }
+
+            this.add.text(panelX + 100, y + 5, `${rank}.`, { fontSize: '22px', color: '#444' });
+
+            const style = (user.username === userLogged)
+                ? { fontSize: '22px', color: '#0f5cad', fontStyle: 'bold' }
+                : { fontSize: '22px', color: '#222' };
+            this.add.text(panelX + 140, y + 5, user.username, style);
+
+            const pointsToShow = user.points ?? user.score ?? 0;
+            this.add.text(panelX + panelWidth - 100, y + 5, `${pointsToShow}`, {
+                fontSize: '22px',
+                color: '#0044cc'
+            }).setOrigin(1, 0);
+        });
     }
 
     resize(gameSize) {

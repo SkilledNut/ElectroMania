@@ -1,7 +1,7 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { register, login, getMe } from '../controllers/authController.js';
-import { protect } from '../middleware/auth.js';
+import { register, login, getMe, getLeaderboard } from '../controllers/authController.js';
+import { protect, optional } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -16,5 +16,7 @@ router.post('/login', [
 ], login);
 
 router.get('/me', protect, getMe);
+
+router.get('/leaderboard', optional, getLeaderboard);
 
 export default router;
