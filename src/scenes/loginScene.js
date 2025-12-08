@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { config } from '../config.js';
 
 export default class LoginScene extends Phaser.Scene {
     constructor() {
@@ -6,15 +7,8 @@ export default class LoginScene extends Phaser.Scene {
     }
 
     create() {
-        var users = JSON.parse(localStorage.getItem('users')) || [];
-
-        // this.add.text(200, 100, 'Vnesi svoje uporabniško ime in geslo!', {
-        //     fontFamily: 'Arial',
-        //     fontSize: '20px',
-        //     color: '#222'
-        // });
-
         const { width, height } = this.scale;
+        let isRegisterMode = false;
 
         // Add resize listener
         this.scale.on('resize', this.resize, this);
@@ -75,7 +69,7 @@ export default class LoginScene extends Phaser.Scene {
         panel.strokeRoundedRect(panelX, panelY, panelWidth, panelHeight, 25);
 
         // naslov
-        this.add.text(width / 2, panelY + 40, 'PRIJAVA', {
+        const titleText = this.add.text(width / 2, panelY + 40, 'PRIJAVA', {
             fontFamily: 'Arial',
             fontSize: '36px',
             fontStyle: 'bold',
@@ -123,16 +117,39 @@ export default class LoginScene extends Phaser.Scene {
         password.style.backgroundColor = '#f9f9f9';
         document.body.appendChild(password);
 
-        // const profilePic = document.createElement('input');
-        // profilePic.type = 'file';
-        // profilePic.accept = 'image/*';
-        // profilePic.style.position = 'absolute';
-        // profilePic.style.width = '400px';
-        // profilePic.style.left = '400px';
-        // profilePic.style.top = '290px';
-        // document.body.appendChild(profilePic);
+        // Register checkbox
+        const checkboxContainer = document.createElement('div');
+        checkboxContainer.style.position = 'absolute';
+        checkboxContainer.style.left = `${width / 2 - inputWidth / 2}px`;
+        checkboxContainer.style.top = `${panelY + 220}px`;
+        checkboxContainer.style.display = 'flex';
+        checkboxContainer.style.alignItems = 'center';
+        checkboxContainer.style.gap = '10px';
 
-        //console.log(profilePic);
+        const registerCheckbox = document.createElement('input');
+        registerCheckbox.type = 'checkbox';
+        registerCheckbox.id = 'registerMode';
+        registerCheckbox.style.width = '20px';
+        registerCheckbox.style.height = '20px';
+        registerCheckbox.style.cursor = 'pointer';
+        
+        const checkboxLabel = document.createElement('label');
+        checkboxLabel.htmlFor = 'registerMode';
+        checkboxLabel.textContent = 'Registriraj nov račun';
+        checkboxLabel.style.fontSize = '16px';
+        checkboxLabel.style.color = '#222';
+        checkboxLabel.style.cursor = 'pointer';
+        checkboxLabel.style.userSelect = 'none';
+
+        checkboxContainer.appendChild(registerCheckbox);
+        checkboxContainer.appendChild(checkboxLabel);
+        document.body.appendChild(checkboxContainer);
+
+        registerCheckbox.addEventListener('change', () => {
+            isRegisterMode = registerCheckbox.checked;
+            titleText.setText(isRegisterMode ? 'REGISTRACIJA' : 'PRIJAVA');
+            loginButton.setText(isRegisterMode ? '▶ Registriraj se' : '▶ Prijavi se');
+        });
 
         const buttonWidth = 180;  
         const buttonHeight = 45;  
@@ -179,33 +196,66 @@ export default class LoginScene extends Phaser.Scene {
                     cornerRadius
                 );
             })
-            .on('pointerdown', () => {
+            .on('pointerdown', async () => {
                 const usernameTrim = username.value.trim();
                 const passwordTrim = password.value.trim();
+
+                if (!usernameTrim || !passwordTrim) {
+                    alert('Vnesi uporabniško ime in geslo!');
+                    return;
+                }
+
+                if (usernameTrim.length < 3) {
+                    alert('Uporabniško ime mora imeti vsaj 3 znake!');
+                    return;
+                }
+
+                if (passwordTrim.length < 6) {
+                    alert('Geslo mora imeti vsaj 6 znakov!');
+                    return;
+                }
+
                 const pfps = ['avatar1','avatar2','avatar3','avatar4','avatar5','avatar6','avatar7','avatar8','avatar9','avatar10','avatar11'];
                 const pfpKey = pfps[Math.floor(Math.random() * pfps.length)];
 
-                if (usernameTrim && passwordTrim) {
-                    const existingUser = users.find(u => u.username == usernameTrim);
-                    if (existingUser) {
-                        if (existingUser.password !== passwordTrim) {
-                            alert('Napačno geslo!');
-                            return;
-                        }
-                    } else {
-                        users.push({ username: usernameTrim, password: passwordTrim, score: 0, profilePic: pfpKey });
-                        localStorage.setItem('users', JSON.stringify(users));
+                try {
+                    const endpoint = isRegisterMode ? '/auth/register' : '/auth/login';
+                    const response = await fetch(`${config.API_URL}${endpoint}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            username: usernameTrim,
+                            password: passwordTrim
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        const errorMsg = data.message || data.errors?.[0]?.msg || 'Napaka pri povezavi';
+                        alert(errorMsg);
+                        return;
                     }
 
-                    localStorage.setItem('username', usernameTrim);
+                    localStorage.setItem('token', data.token);
+                    localStorage.setItem('username', data.username);
+                    localStorage.setItem('userId', data._id);
                     localStorage.setItem('profilePic', pfpKey);
+                    
+                    if (data.currentChallengeIndex !== undefined) {
+                        localStorage.setItem('currentChallengeIndex', data.currentChallengeIndex);
+                    }
 
                     username.remove();
                     password.remove();
+                    checkboxContainer.remove();
 
                     this.scene.start('LabScene');
-                } else {
-                    alert('Vnesi uporabniško ime in geslo!');
+                } catch (error) {
+                    console.error('Error:', error);
+                    alert('Napaka pri povezavi s strežnikom. Preveri ali backend teče.');
                 }
             });
 
@@ -213,6 +263,7 @@ export default class LoginScene extends Phaser.Scene {
         this.events.once('shutdown', () => {
             username.remove();
             password.remove();
+            checkboxContainer.remove();
         });
 
         const backButton = this.add.text(40, 30, '↩ Nazaj v meni', {
@@ -229,6 +280,7 @@ export default class LoginScene extends Phaser.Scene {
             .on('pointerdown', () => {
                 username.remove();
                 password.remove();
+                checkboxContainer.remove();
                 this.scene.start('MenuScene');
             });
 
