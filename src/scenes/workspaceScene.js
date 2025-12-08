@@ -1999,7 +1999,8 @@ case "voltmeter":
     this.checkText.setStyle({ color: "#00aa00" });
     this.checkText.setText("Čestitke! Krog je pravilen.");
     
-    const serverConfirmed = await this.addPoints(10);
+    // Ask backend to award the challenge's points (do not send a hardcoded score)
+    const serverConfirmed = await this.addPoints();
 
     if (currentChallenge.theory) {
       this.showTheory(currentChallenge.theory);
@@ -2033,6 +2034,7 @@ case "voltmeter":
 
     localStorage.setItem(
       "currentChallengeIndex",
+     
       this.currentChallengeIndex.toString()
     );
     this.checkText.setText("");
@@ -2053,51 +2055,68 @@ case "voltmeter":
     const username = localStorage.getItem("username");
     const token = localStorage.getItem("token");
 
-    const users = JSON.parse(localStorage.getItem("users")) || [];
-    const userData = users.find((u) => u.username === username);
-    if (userData) {
-      userData.score = (userData.score || 0) + points;
-      localStorage.setItem("users", JSON.stringify(users));
-    }
-
+    // Offline fallback: use local challenge points if available, else 10
     if (!token) {
-      return false; 
+      const offlinePoints = this.challenges[this.currentChallengeIndex]?.points ?? 10;
+      const users = JSON.parse(localStorage.getItem("users")) || [];
+      const userData = users.find((u) => u.username === username);
+      if (userData) {
+        userData.score = (userData.score || 0) + offlinePoints;
+        userData.points = userData.score; // keep legacy/points in sync
+        localStorage.setItem("users", JSON.stringify(users));
+        localStorage.setItem("points", String(userData.points || userData.score));
+      }
+      return false;
     }
-
+    
     try {
-      const resp = await fetch(`${config.API_URL}/challenges/${this.currentChallengeIndex}/complete`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ score: points })
-      });
+      // Do not send a hardcoded score — let backend use challenge.points
+      const resp = await fetch(
+        `${config.API_URL}/challenges/${this.currentChallengeIndex}/complete`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({}), // empty body => server uses challenge.points
+        }
+      );
 
       const data = await resp.json();
 
       if (!resp.ok) {
-        console.warn('Server rejected completion:', data);
+        console.warn("Server rejected completion:", data);
         return false;
       }
 
+      // Update currentChallengeIndex from server response (either top-level or inside user)
       if (data.currentChallengeIndex !== undefined) {
         this.currentChallengeIndex = data.currentChallengeIndex;
-        localStorage.setItem('currentChallengeIndex', String(this.currentChallengeIndex));
+        localStorage.setItem("currentChallengeIndex", String(this.currentChallengeIndex));
       } else if (data.user && data.user.currentChallengeIndex !== undefined) {
         this.currentChallengeIndex = data.user.currentChallengeIndex;
-        localStorage.setItem('currentChallengeIndex', String(this.currentChallengeIndex));
+        localStorage.setItem("currentChallengeIndex", String(this.currentChallengeIndex));
       }
 
+      // Update local users cache with server-provided points
       if (data.user && data.user.points !== undefined) {
-        localStorage.setItem('points', String(data.user.points));
+        const users = JSON.parse(localStorage.getItem("users")) || [];
+        let userEntry = users.find((u) => u.username === username);
+        if (userEntry) {
+          userEntry.points = data.user.points;
+          userEntry.score = data.user.points; // keep legacy value in sync
+        } else {
+          users.push({ username, profilePic: null, points: data.user.points, score: data.user.points });
+        }
+        localStorage.setItem("users", JSON.stringify(users));
+        localStorage.setItem("points", String(data.user.points));
       }
 
       this.serverAdvanced = true;
-
       return true;
     } catch (err) {
-      console.error('Error saving progress to server:', err);
+      console.error("Error saving progress to server:", err);
       return false;
     }
   }
