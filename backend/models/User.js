@@ -29,6 +29,10 @@ const userSchema = new mongoose.Schema({
   currentChallengeIndex: {
     type: Number,
     default: 0
+  },
+  points: {
+    type: Number,
+    default: 0
   }
 }, {
   timestamps: true

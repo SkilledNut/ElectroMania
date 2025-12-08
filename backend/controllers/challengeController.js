@@ -139,12 +139,18 @@ export const completeChallenge = async (req, res) => {
       c => c.challengeId.toString() === challenge._id.toString()
     );
 
+    // Determine earned points (either provided or from challenge)
+    const earned = Number(req.body.score) || challenge.points || 0;
+
     if (!alreadyCompleted) {
       user.completedChallenges.push({
         challengeId: challenge._id,
-        score: req.body.score || challenge.points,
+        score: earned,
         completedAt: new Date()
       });
+
+      // increment stored points
+      user.points = (user.points || 0) + earned;
 
       if (user.currentChallengeIndex === challenge.order) {
         user.currentChallengeIndex += 1;
@@ -153,10 +159,20 @@ export const completeChallenge = async (req, res) => {
       await user.save();
     }
 
+    // Return sanitized user info so frontend can update local state
+    const userResp = {
+      _id: user._id,
+      username: user.username,
+      points: user.points || 0,
+      currentChallengeIndex: user.currentChallengeIndex,
+      completedChallenges: user.completedChallenges
+    };
+
     res.json({
       message: 'Challenge completed',
       completedChallenges: user.completedChallenges,
-      currentChallengeIndex: user.currentChallengeIndex
+      currentChallengeIndex: user.currentChallengeIndex,
+      user: userResp
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

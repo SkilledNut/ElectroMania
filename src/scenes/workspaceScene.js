@@ -7,6 +7,7 @@ import { CircuitGraph } from "../logic/circuit_graph";
 import { Node } from "../logic/node";
 import { Switch } from "../components/switch";
 import { Resistor } from "../components/resistor";
+import { config } from "../config";
 
 export default class WorkspaceScene extends Phaser.Scene {
   constructor() {
@@ -1964,7 +1965,7 @@ case "voltmeter":
     return component;
   }
 
-  checkCircuit() {
+  async checkCircuit() {
     const currentChallenge = this.challenges[this.currentChallengeIndex];
     const placedTypes = this.placedComponents.map((comp) =>
       comp.getData("type")
@@ -1997,15 +1998,17 @@ case "voltmeter":
 
     this.checkText.setStyle({ color: "#00aa00" });
     this.checkText.setText("Čestitke! Krog je pravilen.");
-    this.addPoints(10);
+    
+    const serverConfirmed = await this.addPoints(10);
 
     if (currentChallenge.theory) {
       this.showTheory(currentChallenge.theory);
     } else {
       this.checkText.setStyle({ color: "#00aa00" });
       this.checkText.setText("Čestitke! Krog je pravilen.");
-      this.addPoints(10);
-      this.time.delayedCall(2000, () => this.nextChallenge());
+      this.time.delayedCall(1000, () => {
+        this.nextChallenge(!!serverConfirmed);
+      });
     }
     // this.placedComponents.forEach(comp => comp.destroy());
     // this.placedComponents = [];
@@ -2021,8 +2024,13 @@ case "voltmeter":
     // }
   }
 
-  nextChallenge() {
-    this.currentChallengeIndex++;
+  nextChallenge(skipIncrement = false) {
+    if (!skipIncrement && !this.serverAdvanced) {
+      this.currentChallengeIndex++;
+    } else if (this.serverAdvanced) {
+      this.serverAdvanced = false;
+    }
+
     localStorage.setItem(
       "currentChallengeIndex",
       this.currentChallengeIndex.toString()
@@ -2041,14 +2049,57 @@ case "voltmeter":
     }
   }
 
-  addPoints(points) {
-    const user = localStorage.getItem("username");
+  async addPoints(points) {
+    const username = localStorage.getItem("username");
+    const token = localStorage.getItem("token");
+
     const users = JSON.parse(localStorage.getItem("users")) || [];
-    const userData = users.find((u) => u.username === user);
+    const userData = users.find((u) => u.username === username);
     if (userData) {
       userData.score = (userData.score || 0) + points;
+      localStorage.setItem("users", JSON.stringify(users));
     }
-    localStorage.setItem("users", JSON.stringify(users));
+
+    if (!token) {
+      return false; 
+    }
+
+    try {
+      const resp = await fetch(`${config.API_URL}/challenges/${this.currentChallengeIndex}/complete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ score: points })
+      });
+
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        console.warn('Server rejected completion:', data);
+        return false;
+      }
+
+      if (data.currentChallengeIndex !== undefined) {
+        this.currentChallengeIndex = data.currentChallengeIndex;
+        localStorage.setItem('currentChallengeIndex', String(this.currentChallengeIndex));
+      } else if (data.user && data.user.currentChallengeIndex !== undefined) {
+        this.currentChallengeIndex = data.user.currentChallengeIndex;
+        localStorage.setItem('currentChallengeIndex', String(this.currentChallengeIndex));
+      }
+
+      if (data.user && data.user.points !== undefined) {
+        localStorage.setItem('points', String(data.user.points));
+      }
+
+      this.serverAdvanced = true;
+
+      return true;
+    } catch (err) {
+      console.error('Error saving progress to server:', err);
+      return false;
+    }
   }
 
   showTheory(theoryText) {

@@ -26,6 +26,8 @@ export const register = async (req, res) => {
       res.status(201).json({
         _id: user._id,
         username: user.username,
+        points: user.points || 0,
+        currentChallengeIndex: user.currentChallengeIndex,
         token: generateToken(user._id)
       });
     }
@@ -51,6 +53,7 @@ export const login = async (req, res) => {
         username: user.username,
         currentChallengeIndex: user.currentChallengeIndex,
         completedChallenges: user.completedChallenges,
+        points: user.points || 0,
         token: generateToken(user._id)
       });
     } else {
@@ -64,7 +67,14 @@ export const login = async (req, res) => {
 export const getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-password');
-    res.json(user);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    res.json({
+      _id: user._id,
+      username: user.username,
+      points: user.points || 0,
+      currentChallengeIndex: user.currentChallengeIndex,
+      completedChallenges: user.completedChallenges
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
