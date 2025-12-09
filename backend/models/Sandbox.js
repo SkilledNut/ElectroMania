@@ -1,16 +1,20 @@
 import mongoose from 'mongoose';
 
+const logicComponentSchema = new mongoose.Schema({
+  id: String,
+  type: String,
+  is_on: Boolean,
+  voltage: Number,
+  resistance: Number
+}, { _id: false });
+
 const componentSchema = new mongoose.Schema({
   x: Number,
   y: Number,
   type: String,
   rotation: Number,
   angle: Number,
-  logicComponent: {
-    id: String,
-    type: String,
-    is_on: Boolean
-  }
+  logicComponent: logicComponentSchema
 }, { _id: false });
 
 const sandboxSchema = new mongoose.Schema({

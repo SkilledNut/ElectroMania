@@ -249,6 +249,11 @@ export default class WorkspaceScene extends Phaser.Scene {
       this.scene.start("ScoreboardScene", { cameFromMenu: false })
     );
     makeButton(width - 140, 125, "Preveri krog", () => this.checkCircuit());
+    
+    // Sandbox buttons
+    makeButton(width - 140, 185, "Shrani", () => this.showSaveDialog());
+    makeButton(width - 140, 235, "Naloži", () => this.showLoadDialog());
+    makeButton(width - 140, 285, "Počisti", () => this.clearSandbox());
 
     // stranska vrstica na levi
     const panelWidth = 150;
@@ -2178,6 +2183,505 @@ case "voltmeter":
       this.continueButton = null;
     }
   }
+
+  // ==================== SANDBOX SAVE/LOAD METHODS ====================
+
+  /**
+   * Serialize all placed components for saving
+   */
+  serializeComponents() {
+    return this.placedComponents.map(component => {
+      const logicComp = component.getData("logicComponent");
+      return {
+        x: component.x,
+        y: component.y,
+        type: component.getData("type"),
+        rotation: component.getData("rotation") || 0,
+        angle: component.angle || 0,
+        logicComponent: logicComp ? {
+          id: logicComp.id,
+          type: logicComp.type,
+          is_on: logicComp.is_on,
+          voltage: logicComp.voltage,
+          resistance: logicComp.resistance
+        } : null
+      };
+    });
+  }
+
+  /**
+   * Get current camera state
+   */
+  getCameraState() {
+    return {
+      x: this.cameras.main.scrollX,
+      y: this.cameras.main.scrollY,
+      zoom: this.cameras.main.zoom
+    };
+  }
+
+  /**
+   * Save sandbox to database
+   */
+  async saveSandbox(name = 'Autosave', isAutoSave = true) {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      this.showSandboxNotification("Prosim prijavi se za shranjevanje", 0xff0000);
+      return false;
+    }
+
+    try {
+      const components = this.serializeComponents();
+      const cameraPosition = this.getCameraState();
+
+      const endpoint = isAutoSave ? '/sandbox/quicksave' : '/sandbox';
+      const response = await fetch(`${config.API_URL}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name,
+          components,
+          cameraPosition,
+          isAutoSave
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save sandbox');
+      }
+
+      const result = await response.json();
+      console.log('[Sandbox] Saved successfully:', result._id);
+      this.showSandboxNotification("Shranjeno!", 0x00aa00);
+      return result;
+    } catch (error) {
+      console.error('[Sandbox] Save error:', error);
+      this.showSandboxNotification("Napaka pri shranjevanju", 0xff0000);
+      return false;
+    }
+  }
+
+  /**
+   * Load sandbox from database
+   */
+  async loadSandbox(saveId = null) {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      this.showSandboxNotification("Prosim prijavi se za nalaganje", 0xff0000);
+      return false;
+    }
+
+    try {
+      const endpoint = saveId ? `/sandbox/${saveId}` : '/sandbox/autosave';
+      const response = await fetch(`${config.API_URL}${endpoint}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.status === 404) {
+        this.showSandboxNotification("Ni shranjenih podatkov", 0xffaa00);
+        return false;
+      }
+
+      if (!response.ok) {
+        throw new Error('Failed to load sandbox');
+      }
+
+      const save = await response.json();
+      
+      // Clear existing components
+      this.clearSandbox(false);
+
+      // Restore camera position
+      if (save.cameraPosition) {
+        this.cameras.main.scrollX = save.cameraPosition.x || 0;
+        this.cameras.main.scrollY = save.cameraPosition.y || 0;
+        this.cameras.main.zoom = save.cameraPosition.zoom || 1;
+      }
+
+      // Recreate components
+      if (save.components && Array.isArray(save.components)) {
+        for (const compData of save.components) {
+          const component = this.createComponent(
+            compData.x,
+            compData.y,
+            compData.type,
+            this.getColorForType(compData.type),
+            { isInPanel: false }
+          );
+
+          // Restore rotation
+          if (compData.rotation !== undefined) {
+            component.setData("rotation", compData.rotation);
+            component.setAngle(compData.angle || compData.rotation);
+          }
+
+          // Restore logic component state
+          const logicComp = component.getData("logicComponent");
+          if (logicComp && compData.logicComponent) {
+            if (compData.logicComponent.is_on !== undefined) {
+              logicComp.is_on = compData.logicComponent.is_on;
+            }
+            if (compData.logicComponent.voltage !== undefined) {
+              logicComp.voltage = compData.logicComponent.voltage;
+            }
+            if (compData.logicComponent.resistance !== undefined) {
+              logicComp.resistance = compData.logicComponent.resistance;
+            }
+          }
+
+          // Update switch texture based on state
+          if (compData.type === 'stikalo-on' || compData.type === 'stikalo-off') {
+            const image = component.getData("componentImage");
+            if (image && logicComp) {
+              image.setTexture(logicComp.is_on ? 'stikalo-on' : 'stikalo-off');
+            }
+          }
+
+          this.placedComponents.push(component);
+          this.updateLogicNodePositions(component);
+        }
+      }
+
+      this.rebuildGraph();
+      console.log('[Sandbox] Loaded successfully:', save._id);
+      this.showSandboxNotification("Naloženo!", 0x00aa00);
+      return true;
+    } catch (error) {
+      console.error('[Sandbox] Load error:', error);
+      this.showSandboxNotification("Napaka pri nalaganju", 0xff0000);
+      return false;
+    }
+  }
+
+  /**
+   * Get all sandbox saves for showing in a list
+   */
+  async getSandboxSaves() {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      return [];
+    }
+
+    try {
+      const response = await fetch(`${config.API_URL}/sandbox`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch saves');
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('[Sandbox] Error fetching saves:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Delete a sandbox save
+   */
+  async deleteSandboxSave(saveId) {
+    const token = localStorage.getItem("token");
+    if (!token) return false;
+
+    try {
+      const response = await fetch(`${config.API_URL}/sandbox/${saveId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      return response.ok;
+    } catch (error) {
+      console.error('[Sandbox] Delete error:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Clear all placed components from sandbox
+   */
+  clearSandbox(showNotification = true) {
+    // Destroy all placed components
+    for (const component of this.placedComponents) {
+      component.destroy();
+    }
+    this.placedComponents = [];
+
+    // Clear electricity visualization
+    if (this.electricityParticles) {
+      this.electricityParticles.forEach(p => {
+        if (p.tween) p.tween.remove();
+        p.destroy();
+      });
+      this.electricityParticles = [];
+    }
+    if (this.electricityGraphics) {
+      this.electricityGraphics.clear();
+    }
+
+    // Rebuild empty graph
+    this.rebuildGraph();
+
+    if (showNotification) {
+      this.showSandboxNotification("Počiščeno!", 0x00aa00);
+    }
+  }
+
+  /**
+   * Get color for component type
+   */
+  getColorForType(type) {
+    const colors = {
+      'baterija': 0xffcc00,
+      'upor': 0xff6600,
+      'svetilka': 0xff0000,
+      'stikalo-on': 0x666666,
+      'stikalo-off': 0x666666,
+      'žica': 0x0066cc,
+      'ammeter': 0x00cc66,
+      'voltmeter': 0x00cc66
+    };
+    return colors[type] || 0xffffff;
+  }
+
+  /**
+   * Show a brief notification message
+   */
+  showSandboxNotification(message, color = 0x00aa00) {
+    const { width, height } = this.cameras.main;
+    
+    const bg = this.add.rectangle(width / 2, 100, 250, 40, color, 0.9)
+      .setOrigin(0.5)
+      .setDepth(3000)
+      .setScrollFactor(0);
+    
+    const text = this.add.text(width / 2, 100, message, {
+      fontSize: '16px',
+      color: '#ffffff',
+      fontStyle: 'bold'
+    })
+      .setOrigin(0.5)
+      .setDepth(3001)
+      .setScrollFactor(0);
+
+    // Fade out and destroy
+    this.tweens.add({
+      targets: [bg, text],
+      alpha: 0,
+      y: 80,
+      duration: 1500,
+      delay: 1000,
+      ease: 'Cubic.easeOut',
+      onComplete: () => {
+        bg.destroy();
+        text.destroy();
+      }
+    });
+  }
+
+  /**
+   * Show sandbox save dialog with name input
+   */
+  showSaveDialog() {
+    const { width, height } = this.cameras.main;
+
+    // Overlay
+    const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7)
+      .setOrigin(0.5)
+      .setDepth(2000)
+      .setScrollFactor(0);
+
+    // Dialog
+    const dialogWidth = 400;
+    const dialogHeight = 200;
+    const dialogBg = this.add.graphics();
+    dialogBg.setDepth(2001).setScrollFactor(0);
+    dialogBg.fillStyle(0xffffff, 1);
+    dialogBg.fillRoundedRect(width / 2 - dialogWidth / 2, height / 2 - dialogHeight / 2, dialogWidth, dialogHeight, 15);
+    dialogBg.lineStyle(3, 0x3399ff, 1);
+    dialogBg.strokeRoundedRect(width / 2 - dialogWidth / 2, height / 2 - dialogHeight / 2, dialogWidth, dialogHeight, 15);
+
+    const titleText = this.add.text(width / 2, height / 2 - 60, 'Shrani vezje', {
+      fontSize: '24px',
+      color: '#222',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    // Input
+    const inputField = document.createElement('input');
+    inputField.type = 'text';
+    inputField.placeholder = 'Ime shranitve...';
+    inputField.value = `Vezje ${new Date().toLocaleDateString('sl-SI')}`;
+    inputField.style.cssText = `
+      position: absolute;
+      left: ${width / 2 - 150}px;
+      top: ${height / 2 - 15}px;
+      width: 300px;
+      height: 40px;
+      font-size: 16px;
+      text-align: center;
+      border-radius: 8px;
+      border: 2px solid #3399ff;
+      outline: none;
+      padding: 5px;
+      z-index: 3000;
+    `;
+    document.body.appendChild(inputField);
+    inputField.focus();
+    inputField.select();
+
+    const closeDialog = () => {
+      inputField.remove();
+      overlay.destroy();
+      dialogBg.destroy();
+      titleText.destroy();
+      cancelBg.destroy();
+      cancelBtn.destroy();
+      saveBg.destroy();
+      saveBtn.destroy();
+    };
+
+    // Buttons
+    const buttonWidth = 120;
+    const buttonHeight = 40;
+    const buttonY = height / 2 + 50;
+
+    const cancelBg = this.add.graphics().setDepth(2001).setScrollFactor(0);
+    cancelBg.fillStyle(0xcccccc, 1);
+    cancelBg.fillRoundedRect(width / 2 - buttonWidth - 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+
+    const cancelBtn = this.add.text(width / 2 - buttonWidth / 2 - 10, buttonY, 'Prekliči', {
+      fontSize: '18px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', closeDialog);
+
+    const saveBg = this.add.graphics().setDepth(2001).setScrollFactor(0);
+    saveBg.fillStyle(0x3399ff, 1);
+    saveBg.fillRoundedRect(width / 2 + 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+
+    const saveBtn = this.add.text(width / 2 + buttonWidth / 2 + 10, buttonY, 'Shrani', {
+      fontSize: '18px',
+      color: '#ffffff',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', async () => {
+        const name = inputField.value.trim() || 'Untitled';
+        closeDialog();
+        await this.saveSandbox(name, false);
+      });
+
+    inputField.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') saveBtn.emit('pointerdown');
+      else if (e.key === 'Escape') closeDialog();
+    });
+  }
+
+  /**
+   * Show sandbox load dialog with list of saves
+   */
+  async showLoadDialog() {
+    const { width, height } = this.cameras.main;
+    const saves = await this.getSandboxSaves();
+
+    // Overlay
+    const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7)
+      .setOrigin(0.5)
+      .setDepth(2000)
+      .setScrollFactor(0);
+
+    // Dialog
+    const dialogWidth = 450;
+    const dialogHeight = 350;
+    const dialogBg = this.add.graphics();
+    dialogBg.setDepth(2001).setScrollFactor(0);
+    dialogBg.fillStyle(0xffffff, 1);
+    dialogBg.fillRoundedRect(width / 2 - dialogWidth / 2, height / 2 - dialogHeight / 2, dialogWidth, dialogHeight, 15);
+    dialogBg.lineStyle(3, 0x3399ff, 1);
+    dialogBg.strokeRoundedRect(width / 2 - dialogWidth / 2, height / 2 - dialogHeight / 2, dialogWidth, dialogHeight, 15);
+
+    const titleText = this.add.text(width / 2, height / 2 - dialogHeight / 2 + 30, 'Naloži vezje', {
+      fontSize: '24px',
+      color: '#222',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    const elements = [overlay, dialogBg, titleText];
+
+    const closeDialog = () => {
+      elements.forEach(el => el.destroy());
+    };
+
+    // Save list
+    const listStartY = height / 2 - dialogHeight / 2 + 70;
+    const itemHeight = 45;
+
+    if (saves.length === 0) {
+      const noSaves = this.add.text(width / 2, height / 2, 'Ni shranjenih vezij', {
+        fontSize: '16px',
+        color: '#666'
+      }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+      elements.push(noSaves);
+    } else {
+      saves.slice(0, 5).forEach((save, index) => {
+        const itemY = listStartY + index * itemHeight;
+        
+        const itemBg = this.add.rectangle(width / 2, itemY, dialogWidth - 40, 40, 0xf0f0f0)
+          .setOrigin(0.5)
+          .setDepth(2002)
+          .setScrollFactor(0)
+          .setInteractive({ useHandCursor: true })
+          .on('pointerover', () => itemBg.setFillStyle(0xe0e0e0))
+          .on('pointerout', () => itemBg.setFillStyle(0xf0f0f0))
+          .on('pointerdown', async () => {
+            closeDialog();
+            await this.loadSandbox(save._id);
+          });
+
+        const date = new Date(save.updatedAt).toLocaleString('sl-SI');
+        const itemText = this.add.text(width / 2 - dialogWidth / 2 + 40, itemY, 
+          `${save.name}${save.isAutoSave ? ' (auto)' : ''}`, {
+          fontSize: '14px',
+          color: '#222'
+        }).setOrigin(0, 0.5).setDepth(2003).setScrollFactor(0);
+
+        const dateText = this.add.text(width / 2 + dialogWidth / 2 - 40, itemY, date, {
+          fontSize: '12px',
+          color: '#666'
+        }).setOrigin(1, 0.5).setDepth(2003).setScrollFactor(0);
+
+        elements.push(itemBg, itemText, dateText);
+      });
+    }
+
+    // Close button
+    const closeBg = this.add.graphics().setDepth(2001).setScrollFactor(0);
+    closeBg.fillStyle(0xcccccc, 1);
+    closeBg.fillRoundedRect(width / 2 - 60, height / 2 + dialogHeight / 2 - 50, 120, 40, 8);
+    elements.push(closeBg);
+
+    const closeBtn = this.add.text(width / 2, height / 2 + dialogHeight / 2 - 30, 'Zapri', {
+      fontSize: '18px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', closeDialog);
+    elements.push(closeBtn);
+  }
+
+  // ==================== END SANDBOX METHODS ====================
 
   showVoltageDialog(logicComp, currentVoltage) {
     const { width, height } = this.cameras.main;
