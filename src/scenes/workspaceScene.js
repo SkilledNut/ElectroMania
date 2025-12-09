@@ -21,6 +21,7 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.pendingPlacement = null;
     this.isPlacingNewComponent = false;
     this.previewRotation = 0;
+    this.dialogCooldown = false;
   }
 
   init(data) {
@@ -367,11 +368,10 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.createComponent(panelWidth / 2, 100, "baterija", 0xffcc00, { isInPanel: true });
     this.createComponent(panelWidth / 2, 180, "upor", 0xff6600, { isInPanel: true });
     this.createComponent(panelWidth / 2, 260, "svetilka", 0xff0000, { isInPanel: true });
-    this.createComponent(panelWidth / 2, 340, "stikalo-on", 0x666666, { isInPanel: true });
-    this.createComponent(panelWidth / 2, 420, "stikalo-off", 0x666666, { isInPanel: true });
-    this.createComponent(panelWidth / 2, 500, "žica", 0x0066cc, { isInPanel: true });
-    this.createComponent(panelWidth / 2, 580, "ammeter", 0x00cc66, { isInPanel: true });
-    this.createComponent(panelWidth / 2, 660, "voltmeter", 0x00cc66, { isInPanel: true });
+    this.createComponent(panelWidth / 2, 340, "stikalo-off", 0x666666, { isInPanel: true });
+    this.createComponent(panelWidth / 2, 420, "žica", 0x0066cc, { isInPanel: true });
+    this.createComponent(panelWidth / 2, 500, "ammeter", 0x00cc66, { isInPanel: true });
+    this.createComponent(panelWidth / 2, 580, "voltmeter", 0x00cc66, { isInPanel: true });
 
     this.backButton = this.add
       .text(12, 10, "↩ Nazaj", {
@@ -1349,14 +1349,60 @@ export default class WorkspaceScene extends Phaser.Scene {
   }
 
   /**
-   * Update measurement device labels (ammeter, voltmeter)
+   * Update measurement device labels (ammeter, voltmeter) and component value labels (resistor, battery)
    */
   updateMeasurementLabels() {
     for (const component of this.placedComponents) {
       const logicComp = component.getData("logicComponent");
       if (!logicComp) continue;
 
-      // Only process measurement devices (ammeter and voltmeter)
+      // Update resistor label (show resistance)
+      if (logicComp.type === "resistor") {
+        let label = component.getData("valueLabel");
+        if (!label || !label.active) {
+          if (label) {
+            component.remove(label, true);
+          }
+          label = this.add.text(0, -45, "", {
+            fontSize: "14px",
+            color: "#ffffff",
+            backgroundColor: "#ff6600aa",
+            padding: { x: 6, y: 3 },
+            fontStyle: "bold"
+          }).setOrigin(0.5);
+          component.add(label);
+          label.setPosition(0, -45);
+          component.setData("valueLabel", label);
+        }
+        const resistance = logicComp.ohm || 1.5;
+        label.setText(`${resistance.toFixed(1)} Ω`);
+        continue;
+      }
+
+      // Update battery label (show voltage)
+      if (logicComp.type === "battery") {
+        let label = component.getData("valueLabel");
+        if (!label || !label.active) {
+          if (label) {
+            component.remove(label, true);
+          }
+          label = this.add.text(0, -45, "", {
+            fontSize: "14px",
+            color: "#ffffff",
+            backgroundColor: "#ffcc00aa",
+            padding: { x: 6, y: 3 },
+            fontStyle: "bold"
+          }).setOrigin(0.5);
+          component.add(label);
+          label.setPosition(0, -45);
+          component.setData("valueLabel", label);
+        }
+        const voltage = logicComp.voltage || 3.3;
+        label.setText(`${voltage.toFixed(1)} V`);
+        continue;
+      }
+
+      // Only process measurement devices (ammeter and voltmeter) beyond this point
       if (logicComp.type !== "ammeter" && logicComp.type !== "voltmeter") {
         // Remove any stray valueLabel from non-measurement components
         const strayLabel = component.getData("valueLabel");
@@ -1902,8 +1948,20 @@ case "voltmeter":
 
     // Label - only show for panel components
     if (isInPanel) {
+      // Friendly name mapping for panel labels
+      const labelNames = {
+        "baterija": "baterija",
+        "upor": "upor",
+        "svetilka": "svetilka",
+        "stikalo-off": "stikalo",
+        "stikalo-on": "stikalo",
+        "žica": "žica",
+        "ammeter": "ammeter",
+        "voltmeter": "voltmeter"
+      };
+      const labelText = labelNames[type] || type;
       const label = this.add
-        .text(0, 30, type, {
+        .text(0, 30, labelText, {
           fontSize: "11px",
           color: "#fff",
           backgroundColor: "#00000088",
@@ -2091,10 +2149,18 @@ case "voltmeter":
           this.rebuildGraph();
         }
 
-        // Handle battery voltage adjustment on click
-        if (logicComp && logicComp.type === "battery") {
-          const currentVoltage = logicComp.voltage || 3.3;
-          this.showVoltageDialog(logicComp, currentVoltage);
+        // Handle battery voltage adjustment on click (with cooldown)
+        if (logicComp && logicComp.type === "battery" && !this.dialogCooldown) {
+          this.dialogCooldown = true;
+          this.showVoltageDialog(logicComp, component);
+          this.time.delayedCall(500, () => { this.dialogCooldown = false; });
+        }
+
+        // Handle resistor resistance adjustment on click (with cooldown)
+        if (logicComp && logicComp.type === "resistor" && !this.dialogCooldown) {
+          this.dialogCooldown = true;
+          this.showResistanceDialog(logicComp, component);
+          this.time.delayedCall(500, () => { this.dialogCooldown = false; });
         }
       }
     });
@@ -2357,7 +2423,7 @@ case "voltmeter":
           type: logicComp.type,
           is_on: logicComp.is_on,
           voltage: logicComp.voltage,
-          resistance: logicComp.resistance
+          ohm: logicComp.ohm
         } : null
       };
     });
@@ -2483,8 +2549,8 @@ case "voltmeter":
             if (compData.logicComponent.voltage !== undefined) {
               logicComp.voltage = compData.logicComponent.voltage;
             }
-            if (compData.logicComponent.resistance !== undefined) {
-              logicComp.resistance = compData.logicComponent.resistance;
+            if (compData.logicComponent.ohm !== undefined) {
+              logicComp.ohm = compData.logicComponent.ohm;
             }
           }
 
@@ -2837,7 +2903,8 @@ case "voltmeter":
 
   // ==================== END SANDBOX METHODS ====================
 
-  showVoltageDialog(logicComp, currentVoltage) {
+  showVoltageDialog(logicComp, component) {
+    const currentVoltage = logicComp.voltage || 3.3;
     const { width, height } = this.cameras.main;
 
     // Semi-transparent background overlay
@@ -2977,6 +3044,160 @@ case "voltmeter":
           this.rebuildGraph();
         } else {
           errorText.setText('Prosim vnesi veljavno napetost med 0.1 in 100 V');
+        }
+      });
+
+    // Allow Enter key to confirm
+    inputField.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        confirmBtn.emit('pointerdown');
+      } else if (e.key === 'Escape') {
+        cancelBtn.emit('pointerdown');
+      }
+    });
+  }
+
+  showResistanceDialog(logicComp, component) {
+    const currentResistance = logicComp.ohm || 1.5;
+    const { width, height } = this.cameras.main;
+
+    // Semi-transparent background overlay
+    const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7)
+      .setOrigin(0.5)
+      .setDepth(2000)
+      .setScrollFactor(0);
+
+    // Dialog background
+    const dialogWidth = 400;
+    const dialogHeight = 250;
+    const dialogBg = this.add.graphics();
+    dialogBg.setDepth(2001);
+    dialogBg.setScrollFactor(0);
+    dialogBg.fillStyle(0xffffff, 1);
+    dialogBg.fillRoundedRect(width / 2 - dialogWidth / 2, height / 2 - dialogHeight / 2, dialogWidth, dialogHeight, 15);
+    dialogBg.lineStyle(3, 0xff6600, 1);
+    dialogBg.strokeRoundedRect(width / 2 - dialogWidth / 2, height / 2 - dialogHeight / 2, dialogWidth, dialogHeight, 15);
+
+    // Title
+    const titleText = this.add.text(width / 2, height / 2 - 80, 'Nastavi upornost upora', {
+      fontSize: '24px',
+      color: '#222',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    // Current resistance display
+    const currentText = this.add.text(width / 2, height / 2 - 40, `Trenutna upornost: ${currentResistance.toFixed(1)} Ω`, {
+      fontSize: '16px',
+      color: '#666'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    // HTML Input field
+    const inputField = document.createElement('input');
+    inputField.type = 'number';
+    inputField.value = currentResistance;
+    inputField.min = '0.1';
+    inputField.max = '10000';
+    inputField.step = '0.1';
+    inputField.style.position = 'absolute';
+    inputField.style.left = `${width / 2 - 100}px`;
+    inputField.style.top = `${height / 2 - 5}px`;
+    inputField.style.width = '200px';
+    inputField.style.height = '40px';
+    inputField.style.fontSize = '18px';
+    inputField.style.textAlign = 'center';
+    inputField.style.borderRadius = '8px';
+    inputField.style.border = '2px solid #ff6600';
+    inputField.style.outline = 'none';
+    inputField.style.padding = '5px';
+    inputField.style.zIndex = '3000';
+    document.body.appendChild(inputField);
+    inputField.focus();
+
+    // Error message
+    const errorText = this.add.text(width / 2, height / 2 + 50, '', {
+      fontSize: '14px',
+      color: '#cc0000'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    // Buttons
+    const buttonWidth = 120;
+    const buttonHeight = 40;
+    const buttonY = height / 2 + 90;
+
+    // Cancel button
+    const cancelBg = this.add.graphics();
+    cancelBg.setDepth(2001).setScrollFactor(0);
+    cancelBg.fillStyle(0xcccccc, 1);
+    cancelBg.fillRoundedRect(width / 2 - buttonWidth - 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+
+    const cancelBtn = this.add.text(width / 2 - buttonWidth / 2 - 10, buttonY, 'Prekliči', {
+      fontSize: '18px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerover', () => {
+        cancelBg.clear();
+        cancelBg.fillStyle(0xaaaaaa, 1);
+        cancelBg.fillRoundedRect(width / 2 - buttonWidth - 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerout', () => {
+        cancelBg.clear();
+        cancelBg.fillStyle(0xcccccc, 1);
+        cancelBg.fillRoundedRect(width / 2 - buttonWidth - 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerdown', () => {
+        inputField.remove();
+        overlay.destroy();
+        dialogBg.destroy();
+        titleText.destroy();
+        currentText.destroy();
+        errorText.destroy();
+        cancelBg.destroy();
+        cancelBtn.destroy();
+        confirmBg.destroy();
+        confirmBtn.destroy();
+      });
+
+    // Confirm button
+    const confirmBg = this.add.graphics();
+    confirmBg.setDepth(2001).setScrollFactor(0);
+    confirmBg.fillStyle(0xff6600, 1);
+    confirmBg.fillRoundedRect(width / 2 + 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+
+    const confirmBtn = this.add.text(width / 2 + buttonWidth / 2 + 10, buttonY, 'Potrdi', {
+      fontSize: '18px',
+      color: '#ffffff',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerover', () => {
+        confirmBg.clear();
+        confirmBg.fillStyle(0xcc5500, 1);
+        confirmBg.fillRoundedRect(width / 2 + 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerout', () => {
+        confirmBg.clear();
+        confirmBg.fillStyle(0xff6600, 1);
+        confirmBg.fillRoundedRect(width / 2 + 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerdown', () => {
+        const resistance = parseFloat(inputField.value);
+        if (!isNaN(resistance) && resistance > 0 && resistance <= 10000) {
+          logicComp.ohm = resistance;
+          console.log(`Resistor ${logicComp.id} resistance set to ${resistance}Ω`);
+          inputField.remove();
+          overlay.destroy();
+          dialogBg.destroy();
+          titleText.destroy();
+          currentText.destroy();
+          errorText.destroy();
+          cancelBg.destroy();
+          cancelBtn.destroy();
+          confirmBg.destroy();
+          confirmBtn.destroy();
+          this.rebuildGraph();
+        } else {
+          errorText.setText('Prosim vnesi veljavno upornost med 0.1 in 10000 Ω');
         }
       });
 
