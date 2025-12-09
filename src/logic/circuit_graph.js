@@ -474,24 +474,31 @@ class CircuitGraph {
     // Calculate measurements
     const measurements = this.calculateMeasurements(paths);
 
-    // Update bulbs based on circuit state
+    // Build a set of component IDs that are in any complete path
+    const componentsInPath = new Set();
+    for (const pathObj of paths) {
+      const pathComponents = pathObj.path || pathObj;
+      for (const comp of pathComponents) {
+        componentsInPath.add(comp.id);
+      }
+    }
+
+    // Update bulbs - only turn on if in a complete circuit path
     const bulbs = this.components.filter((c) => c.type === "bulb");
     for (const bulb of bulbs) {
+      const isInPath = componentsInPath.has(bulb.id);
       if (bulb.originalComponent) {
-        bulb.originalComponent.is_on = isComplete;
+        bulb.originalComponent.is_on = isComplete && isInPath;
       }
     }
 
     // Update ammeters - they show current if in a complete path
     const ammeters = this.components.filter((c) => c.type === "ammeter");
     for (const ammeter of ammeters) {
-      // Check if ammeter is in any path
-      const isInPath = paths.some(pathObj => {
-        const pathComponents = pathObj.path || pathObj;
-        return pathComponents.some(comp => comp.id === ammeter.id);
-      });
+      const isInPath = componentsInPath.has(ammeter.id);
       if (ammeter.originalComponent) {
         ammeter.originalComponent.current = isInPath && isComplete ? measurements.current : 0;
+        ammeter.originalComponent.isInPath = isInPath && isComplete;
       }
     }
 
@@ -499,27 +506,30 @@ class CircuitGraph {
     const voltmeters = this.components.filter((c) => c.type === "voltmeter");
     for (const voltmeter of voltmeters) {
       if (voltmeter.originalComponent) {
+        // Check if voltmeter is connected to the circuit
         const voltage = isComplete ? this.calculateVoltmeterReading(voltmeter, paths, measurements) : 0;
         voltmeter.originalComponent.voltage = voltage;
+        voltmeter.originalComponent.isConnected = voltage > 0;
       }
     }
 
     console.log(`[Graph] Circuit is ${isComplete ? "COMPLETE" : "OPEN"}`);
+    console.log(`[Graph] Components in path: ${Array.from(componentsInPath).join(', ')}`);
     console.log(
-      `[Graph] ${bulbs.length} bulb(s) turned ${isComplete ? "ON" : "OFF"}`
+      `[Graph] ${bulbs.length} bulb(s), ${bulbs.filter(b => componentsInPath.has(b.id)).length} in path`
     );
 
     const batteries = this.components.filter((c) => c.type === "battery");
     if (batteries.length === 0) {
       console.log("[Graph] No battery found, circuit is OPEN");
-      return { status: -1, paths: [] };
+      return { status: -1, paths: [], componentsInPath: componentsInPath };
     }
 
     if (isComplete) {
       console.log(`[Graph] Circuit is COMPLETE`);
-      console.log(`[Graph] ${bulbs.length} bulb(s) turned ON`);
+      console.log(`[Graph] Bulbs in path: ${bulbs.filter(b => componentsInPath.has(b.id)).map(b => b.id).join(', ')}`);
       console.log(`[Graph] Measurements: ${measurements.current.toFixed(2)}A, ${measurements.voltage.toFixed(2)}V`);
-      return { status: 1, paths: paths, measurements: measurements };
+      return { status: 1, paths: paths, measurements: measurements, componentsInPath: componentsInPath };
     }
 
     const hasSwitch = this.components.some((c) => c.type === "switch");
@@ -530,12 +540,12 @@ class CircuitGraph {
     if (hasSwitch && anySwitchOff) {
       console.log("[Graph] Circuit OPEN due to switch being OFF");
       console.log(`[Graph] ${bulbs.length} bulb(s) turned OFF`);
-      return { status: -2, paths: [] };
+      return { status: -2, paths: [], componentsInPath: componentsInPath };
     }
 
     console.log("[Graph] Circuit OPEN (no complete path)");
     console.log(`[Graph] ${bulbs.length} bulb(s) turned OFF`);
-    return { status: 0, paths: [] };
+    return { status: 0, paths: [], componentsInPath: componentsInPath };
   }
 }
 

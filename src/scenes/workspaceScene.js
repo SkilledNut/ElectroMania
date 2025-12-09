@@ -24,9 +24,119 @@ export default class WorkspaceScene extends Phaser.Scene {
   }
 
   init(data) {
-    const savedIndex = localStorage.getItem("currentChallengeIndex");
-    this.currentChallengeIndex = savedIndex !== null ? parseInt(savedIndex) : 0;
-    this.isSandboxMode = data?.mode === 'sandbox';
+    // Mode can be 'challenge' or 'sandbox'
+    this.mode = data?.mode || 'challenge';
+    this.isSandboxMode = this.mode === 'sandbox';
+    
+    if (this.mode === 'challenge') {
+      const savedIndex = localStorage.getItem("currentChallengeIndex");
+      this.currentChallengeIndex = savedIndex !== null ? parseInt(savedIndex) : 0;
+    }
+
+    // Infinite canvas settings for both modes
+    this.canvasWidth = 10000;
+    this.canvasHeight = 10000;
+    
+    // Current challenge (will be populated from API)
+    this.currentChallenge = null;
+    this.challengeLoaded = false;
+  }
+
+  async fetchCurrentChallenge() {
+    try {
+      const token = localStorage.getItem("token");
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      // Fetch single challenge by index (the API accepts order index as id)
+      const response = await fetch(`${config.API_URL}/challenges/${this.currentChallengeIndex}`, { headers });
+      
+      if (response.status === 404) {
+        // No more challenges - user completed all
+        this.currentChallenge = null;
+        this.challengeLoaded = true;
+        if (this.promptText) {
+          this.promptText.setText("Vse naloge so uspešno opravljene! Čestitke!");
+        }
+        if (this.missingText) {
+          this.missingText.setText("");
+        }
+        console.log('[WorkspaceScene] All challenges completed!');
+        return;
+      }
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch challenge');
+      }
+      
+      const challenge = await response.json();
+      this.currentChallenge = challenge;
+      this.challengeLoaded = true;
+      
+      // Update prompt text if in challenge mode
+      if (this.mode === 'challenge' && this.promptText && this.currentChallenge) {
+        this.promptText.setText(this.currentChallenge.prompt);
+        this.updateMissingLabel();
+      }
+      
+      console.log('[WorkspaceScene] Loaded challenge:', this.currentChallenge.prompt);
+    } catch (error) {
+      console.error('[WorkspaceScene] Error fetching challenge:', error);
+      // Show error message - challenges must be fetched from API
+      this.currentChallenge = null;
+      this.challengeLoaded = true;
+      if (this.promptText) {
+        this.promptText.setText("Napaka pri nalaganju naloge. Preverite povezavo s strežnikom.");
+      }
+      if (this.missingText) {
+        this.missingText.setText("");
+      }
+    }
+  }
+
+  async completeCurrentChallenge(score = 10) {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        console.warn('[WorkspaceScene] No token, cannot complete challenge on server');
+        return false;
+      }
+      
+      if (!this.currentChallenge || !this.currentChallenge._id) {
+        console.warn('[WorkspaceScene] No valid challenge to complete');
+        return false;
+      }
+      
+      const response = await fetch(`${config.API_URL}/challenges/${this.currentChallenge._id}/complete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ score })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to complete challenge');
+      }
+      
+      const result = await response.json();
+      console.log('[WorkspaceScene] Challenge completed:', result);
+      
+      // Update local storage with server's currentChallengeIndex
+      if (result.currentChallengeIndex !== undefined) {
+        localStorage.setItem("currentChallengeIndex", result.currentChallengeIndex.toString());
+        this.currentChallengeIndex = result.currentChallengeIndex;
+      }
+      return true;
+    } catch (error) {
+      console.error('[WorkspaceScene] Error completing challenge:', error);
+      return false;
+    }
   }
 
   preload() {
@@ -44,27 +154,57 @@ export default class WorkspaceScene extends Phaser.Scene {
   create() {
     const { width, height } = this.cameras.main;
 
-    // površje mize
-    const desk = this.add.rectangle(0, 0, width, height, 0xe0c9a6).setOrigin(0);
+    // Initialize resize timer
+    this.resizeTimer = null;
+
+    // Add resize listener with proper cleanup
+    this.scale.on('resize', this.handleResize, this);
+    
+    // Clean up on scene shutdown
+    this.events.once('shutdown', () => {
+      this.scale.off('resize', this.handleResize, this);
+      if (this.resizeTimer) {
+        clearTimeout(this.resizeTimer);
+      }
+    });
+
+    // Set camera bounds to infinite canvas
+    this.cameras.main.setBounds(0, 0, this.canvasWidth, this.canvasHeight);
+    this.cameras.main.setZoom(1);
+
+    // Center camera initially
+    this.cameras.main.scrollX = (this.canvasWidth - width) / 2;
+    this.cameras.main.scrollY = (this.canvasHeight - height) / 2;
+
+    // Create infinite background with desk and grid
+    const desk = this.add.rectangle(
+      this.canvasWidth / 2,
+      this.canvasHeight / 2,
+      this.canvasWidth,
+      this.canvasHeight,
+      0xe0c9a6
+    );
+
     const gridGraphics = this.add.graphics();
     gridGraphics.lineStyle(1, 0x8b7355, 0.35);
     const gridSize = 40;
-    for (let x = 0; x < width; x += gridSize) {
+    for (let x = 0; x < this.canvasWidth; x += gridSize) {
       gridGraphics.beginPath();
       gridGraphics.moveTo(x, 0);
-      gridGraphics.lineTo(x, height);
+      gridGraphics.lineTo(x, this.canvasHeight);
       gridGraphics.strokePath();
     }
-    for (let y = 0; y < height; y += gridSize) {
+    for (let y = 0; y < this.canvasHeight; y += gridSize) {
       gridGraphics.beginPath();
       gridGraphics.moveTo(0, y);
-      gridGraphics.lineTo(width, y);
+      gridGraphics.lineTo(this.canvasWidth, y);
       gridGraphics.strokePath();
     }
 
     this.infoWindow = this.add.container(0, 0);
     this.infoWindow.setDepth(1000);
     this.infoWindow.setVisible(false);
+    this.infoWindow.setScrollFactor(0); // Fixed to camera
 
     // ozadje info okna
     const infoBox = this.add.rectangle(0, 0, 200, 80, 0x2c2c2c, 0.95);
@@ -81,126 +221,67 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.infoWindow.add([infoBox, infoText]);
     this.infoText = infoText;
 
-    this.challenges = [
-      {
-        prompt: "Sestavi preprosti električni krog z baterijo in svetilko.",
-        requiredComponents: [
-          "baterija",
-          "svetilka",
-          "žica",
-          "žica",
-          "žica",
-          "žica",
-          "žica",
-          "žica",
-        ],
-        theory: [
-          "Osnovni električni krog potrebuje vir, to je v našem primeru baterija. Potrebuje tudi porabnike, to je svetilka. Električni krog je v našem primeru sklenjen, kar je nujno potrebno, da električni tok teče preko prevodnikov oziroma žic.",
-        ],
-      },
-      {
-        prompt:
-          "Sestavi preprosti nesklenjeni električni krog z baterijo, svetilko in stikalom.",
-        requiredComponents: ["baterija", "svetilka", "žica", "stikalo-off"],
-        theory: [
-          "V nesklenjenem krogu je stikalo odprto, kar pomeni, da je električni tok prekinjen. Svetilka posledično zato ne sveti.",
-        ],
-      },
-      {
-        prompt:
-          "Sestavi preprosti sklenjeni električni krog z baterijo, svetilko in stikalom.",
-        requiredComponents: ["baterija", "svetilka", "žica", "stikalo-on"],
-        theory: [
-          "V sklenjenem krogu je stikalo zaprto, kar pomeni, da lahko električni tok teče neovirano. Torej v tem primeru so vrata zaprta.",
-        ],
-      },
-      {
-        prompt:
-          "Sestavi električni krog z baterijo, svetilko in stikalom, ki ga lahko ugašaš in prižigaš.",
-        requiredComponents: [
-          "baterija",
-          "svetilka",
-          "žica",
-          "stikalo-on",
-          "stikalo-off",
-        ],
-        theory: [
-          "Stikalo nam omogoča nadzor nad pretokom električnega toka. Ko je stikalo zaprto, tok teče in posledično svetilka sveti. Kadar pa je stikalo odprto, tok ne teče in se svetilka ugasne. To lahko primerjamo z vklapljanjem in izklapljanjem električnih naprav v naših domovih.",
-        ],
-      },
-      {
-        prompt: "Sestavi krog z dvema baterijama in svetilko. ",
-        requiredComponents: ["baterija", "baterija", "svetilka", "žica"],
-        theory: [
-          "Kadar vežemo dve ali več baterij zaporedno, se napetosti seštevajo. Večja je napetost, večji je električni tok. V našem primeru zato svetilka sveti močneje.",
-        ],
-      },
-      {
-        prompt:
-          "V električni krog zaporedno poveži dve svetilki, ki ju priključiš na baterijo. ",
-        requiredComponents: ["baterija", "svetilka", "svetilka", "žica"],
-        theory: [
-          "V zaporedni vezavi teče isti električni tok skozi vse svetilke. Napetost baterije se porazdeli. Če imamo primer, da ena svetilka preneha delovati, bo ta prekinila tok skozi drugo svetilko.",
-        ],
-      },
+    // Fetch current challenge from API if in challenge mode
+    if (this.mode === 'challenge') {
+      this.fetchCurrentChallenge();
+    }
 
-      {
-        prompt:
-          "V električni krog vzporedno poveži dve svetilki, ki ju priključiš na baterijo. ",
-        requiredComponents: ["baterija", "svetilka", "svetilka", "žica"],
-        theory: [
-          "V vzporedni vezavi ima vsaka svetilka enako napetost kot baterija. Eletrični tok se porazdeli med svetilkami. Če ena svetilka preneha delovati, bo druga še vedno delovala.",
-        ],
-      },
-      {
-        prompt: "Sestavi električni krog s svetilko in uporom. ",
-        requiredComponents: ["baterija", "svetilka", "žica", "upor"],
-        theory: [
-          "Upor omejuje tok v krogu. Večji kot je upor, manjši je tok. Spoznajmo Ohmov zakon: tok (I) = napetost (U) / upornost (R). Svetilka bo svetila manj intenzivno, saj skozi njo teče manjši tok.",
-        ],
-      },
-    ];
+    // Challenges are fetched from the database via API
+    // this.challenges is no longer hardcoded
 
     // this.currentChallengeIndex = 0;
 
-    this.promptText = this.add
-      .text(
-        width / 1.8,
-        height - 30,
-        this.challenges[this.currentChallengeIndex].prompt,
-        {
-          fontSize: "20px",
-          color: "#333",
-          fontStyle: "bold",
-          backgroundColor: "#ffffff88",
-          padding: { x: 15, y: 8 },
-        }
-      )
-      .setOrigin(0.5);
+    // Create mode-specific UI elements
+    if (this.mode === 'challenge') {
+      this.promptText = this.add
+        .text(
+          width / 1.8,
+          height - 30,
+          "Nalaganje nalog...",
+          {
+            fontSize: "20px",
+            color: "#333",
+            fontStyle: "bold",
+            backgroundColor: "#ffffff88",
+            padding: { x: 15, y: 8 },
+          }
+        )
+        .setOrigin(0.5)
+        .setScrollFactor(0);
+    }
 
     this.checkText = this.add
-      .text(width / 2, height - 70, "", {
+      .text(width / 2, this.mode === 'sandbox' ? 70 : height - 70, "", {
         fontSize: "18px",
         color: "#cc0000",
         fontStyle: "bold",
         padding: { x: 15, y: 8 },
+        backgroundColor: this.mode === 'sandbox' ? "#ffffff88" : "",
       })
-      .setOrigin(0.5);
+      .setOrigin(0.5)
+      .setScrollFactor(0);
 
-    this.missingText = this.add
-      .text(width / 2, height - 100, "", {
-        fontSize: "14px",
-        color: "#146c9fff",
-        fontStyle: "bold",
-        padding: { x: 15, y: 8 },
-      })
-      .setOrigin(0.5);
+    if (this.mode === 'challenge') {
+      this.missingText = this.add
+        .text(width / 2, height - 100, "", {
+          fontSize: "14px",
+          color: "#146c9fff",
+          fontStyle: "bold",
+          padding: { x: 15, y: 8 },
+        })
+        .setOrigin(0.5)
+        .setScrollFactor(0);
+    }
 
     const buttonWidth = 180;
     const buttonHeight = 45;
     const cornerRadius = 10;
 
-    const makeButton = (x, y, label, onClick) => {
+    // Store buttons for repositioning on resize
+    this.uiButtons = [];
+    
+    const makeButton = (xOffset, y, label, onClick) => {
+      const x = width - xOffset;
       const bg = this.add.graphics();
       bg.fillStyle(0x3399ff, 1);
       bg.fillRoundedRect(
@@ -210,6 +291,8 @@ export default class WorkspaceScene extends Phaser.Scene {
         buttonHeight,
         cornerRadius
       );
+      bg.setScrollFactor(0);
+      bg.setDepth(850);
 
       const text = this.add
         .text(x, y, label, {
@@ -218,12 +301,15 @@ export default class WorkspaceScene extends Phaser.Scene {
           color: "#ffffff",
         })
         .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(851)
         .setInteractive({ useHandCursor: true })
         .on("pointerover", () => {
+          const currentX = text.x;
           bg.clear();
           bg.fillStyle(0x0f5cad, 1);
           bg.fillRoundedRect(
-            x - buttonWidth / 2,
+            currentX - buttonWidth / 2,
             y - buttonHeight / 2,
             buttonWidth,
             buttonHeight,
@@ -231,10 +317,11 @@ export default class WorkspaceScene extends Phaser.Scene {
           );
         })
         .on("pointerout", () => {
+          const currentX = text.x;
           bg.clear();
           bg.fillStyle(0x3399ff, 1);
           bg.fillRoundedRect(
-            x - buttonWidth / 2,
+            currentX - buttonWidth / 2,
             y - buttonHeight / 2,
             buttonWidth,
             buttonHeight,
@@ -243,26 +330,28 @@ export default class WorkspaceScene extends Phaser.Scene {
         })
         .on("pointerdown", onClick);
 
-      return { bg, text };
+      const button = { bg, text, xOffset, y };
+      this.uiButtons.push(button);
+      return button;
     };
 
-    makeButton(width - 140, 75, "Lestvica", () =>
+    makeButton(140, 75, "Lestvica", () =>
       this.scene.start("ScoreboardScene", { cameFromMenu: false })
     );
-    makeButton(width - 140, 125, "Preveri krog", () => this.checkCircuit());
+    makeButton(140, 125, "Preveri krog", () => this.checkCircuit());
     
     // Sandbox buttons - only show in sandbox mode
     if (this.isSandboxMode) {
-      makeButton(width - 140, 190, "Shrani", () => this.showSaveDialog());
-      makeButton(width - 140, 245, "Naloži", () => this.showLoadDialog());
-      makeButton(width - 140, 300, "Počisti", () => this.clearSandbox());
+      makeButton(140, 190, "Shrani", () => this.showSaveDialog());
+      makeButton(140, 245, "Naloži", () => this.showLoadDialog());
+      makeButton(140, 300, "Počisti", () => this.clearSandbox());
     }
 
     // stranska vrstica na levi
     const panelWidth = 150;
     this.panelWidth = panelWidth;
-    this.add.rectangle(0, 0, panelWidth, height, 0xc0c0c0).setOrigin(0);
-    this.add.rectangle(0, 0, panelWidth, height, 0x000000, 0.2).setOrigin(0);
+    this.leftPanel = this.add.rectangle(0, 0, panelWidth, height, 0xc0c0c0).setOrigin(0).setScrollFactor(0).setDepth(800);
+    this.leftPanelOverlay = this.add.rectangle(0, 0, panelWidth, height, 0x000000, 0.2).setOrigin(0).setScrollFactor(0).setDepth(801);
 
     this.add
       .text(panelWidth / 2, 60, "Komponente", {
@@ -270,19 +359,21 @@ export default class WorkspaceScene extends Phaser.Scene {
         color: "#ffffff",
         fontStyle: "bold",
       })
-      .setOrigin(0.5);
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(802);
 
-    // komponente v stran vrstici
-    this.createComponent(panelWidth / 2, 100, "baterija", 0xffcc00);
-    this.createComponent(panelWidth / 2, 180, "upor", 0xff6600);
-    this.createComponent(panelWidth / 2, 260, "svetilka", 0xff0000);
-    this.createComponent(panelWidth / 2, 340, "stikalo-on", 0x666666);
-    this.createComponent(panelWidth / 2, 420, "stikalo-off", 0x666666);
-    this.createComponent(panelWidth / 2, 500, "žica", 0x0066cc);
-    this.createComponent(panelWidth / 2, 580, "ammeter", 0x00cc66);
-    this.createComponent(panelWidth / 2, 660, "voltmeter", 0x00cc66);
+    // komponente v stranski vrstici (these stay at fixed positions)
+    this.createComponent(panelWidth / 2, 100, "baterija", 0xffcc00, { isInPanel: true });
+    this.createComponent(panelWidth / 2, 180, "upor", 0xff6600, { isInPanel: true });
+    this.createComponent(panelWidth / 2, 260, "svetilka", 0xff0000, { isInPanel: true });
+    this.createComponent(panelWidth / 2, 340, "stikalo-on", 0x666666, { isInPanel: true });
+    this.createComponent(panelWidth / 2, 420, "stikalo-off", 0x666666, { isInPanel: true });
+    this.createComponent(panelWidth / 2, 500, "žica", 0x0066cc, { isInPanel: true });
+    this.createComponent(panelWidth / 2, 580, "ammeter", 0x00cc66, { isInPanel: true });
+    this.createComponent(panelWidth / 2, 660, "voltmeter", 0x00cc66, { isInPanel: true });
 
-    const backButton = this.add
+    this.backButton = this.add
       .text(12, 10, "↩ Nazaj", {
         fontFamily: "Arial",
         fontSize: "20px",
@@ -290,21 +381,28 @@ export default class WorkspaceScene extends Phaser.Scene {
         padding: { x: 20, y: 10 },
       })
       .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(900)
       .setInteractive({ useHandCursor: true })
-      .on("pointerover", () => backButton.setStyle({ color: "#0054fdff" }))
-      .on("pointerout", () => backButton.setStyle({ color: "#387affff" }))
+      .on("pointerover", () => this.backButton.setStyle({ color: "#0054fdff" }))
+      .on("pointerout", () => this.backButton.setStyle({ color: "#387affff" }))
       .on("pointerdown", () => {
         this.cameras.main.fade(300, 0, 0, 0);
         this.time.delayedCall(300, () => {
-          this.scene.start("LabScene");
+          this.scene.start(this.mode === 'sandbox' ? "MenuScene" : "LabScene");
         });
       });
 
-    this.add
+    // Mode-specific title
+    const titleText = this.mode === 'sandbox' 
+      ? "Sandbox način - Povleci zemljevid s srednjo tipko miške"
+      : "Povleci komponente na mizo in zgradi svoj električni krog!";
+    
+    this.titleText = this.add
       .text(
         width / 2 + 50,
         30,
-        "Povleci komponente na mizo in zgradi svoj električni krog!",
+        titleText,
         {
           fontSize: "20px",
           color: "#333",
@@ -314,7 +412,9 @@ export default class WorkspaceScene extends Phaser.Scene {
           padding: { x: 15, y: 8 },
         }
       )
-      .setOrigin(0.5);
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(900);
 
     // shrani komponente na mizi
     this.placedComponents = [];
@@ -324,6 +424,10 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.electricityGraphics = this.add.graphics();
     this.electricityGraphics.setDepth(5); // Above components
     this.electricityParticles = [];
+    this.electricityTimers = [];
+
+    // Setup camera dragging (works in both modes)
+    this.setupCameraDragging();
 
     // Helper function for rotation
     const rotateComponent = (component, direction) => {
@@ -508,6 +612,9 @@ export default class WorkspaceScene extends Phaser.Scene {
     // Create connection point graphics
     this.connectionPointGraphics = this.add.graphics();
     this.connectionPointGraphics.setDepth(4);
+
+    // Setup camera dragging with middle mouse button
+    this.setupCameraDragging();
 
     console.log(JSON.parse(localStorage.getItem("users")));
   }
@@ -1067,7 +1174,10 @@ export default class WorkspaceScene extends Phaser.Scene {
   }
 
   getMissingComponents() {
-    const currentChallenge = this.challenges[this.currentChallengeIndex];
+    const currentChallenge = this.currentChallenge;
+    if (!currentChallenge || !currentChallenge.requiredComponents) {
+      return [];
+    }
     const placedTypes = this.placedComponents.map((comp) =>
       comp.getData("type")
     );
@@ -1166,12 +1276,11 @@ export default class WorkspaceScene extends Phaser.Scene {
   updateMissingComponentsLabel() {
     if (
       !this.missingText ||
-      !this.challenges ||
-      this.currentChallengeIndex === undefined
+      !this.currentChallenge
     )
       return;
 
-    const currentChallenge = this.challenges[this.currentChallengeIndex];
+    const currentChallenge = this.currentChallenge;
     if (!currentChallenge || !currentChallenge.requiredComponents) {
       this.missingText.setText("");
       return;
@@ -1278,9 +1387,9 @@ export default class WorkspaceScene extends Phaser.Scene {
           label.setPosition(0, -45); // Ensure relative position to container
           component.setData("valueLabel", label);
         }
-        // Use dynamic current from circuit simulation
-        const current = this.circuitCurrent || 0;
-        console.log(`Ammeter ${logicComp.id}: circuitCurrent=${this.circuitCurrent}, displaying ${current.toFixed(2)} A`);
+        // Use the ammeter's own current value (set by simulation based on whether it's in path)
+        const current = logicComp.isInPath ? (logicComp.current || 0) : 0;
+        console.log(`Ammeter ${logicComp.id}: isInPath=${logicComp.isInPath}, current=${current.toFixed(2)} A`);
         label.setText(current > 0 ? `${current.toFixed(2)} A` : "0 A");
       }
 
@@ -1304,12 +1413,10 @@ export default class WorkspaceScene extends Phaser.Scene {
           label.setPosition(0, -45); // Ensure relative position
           component.setData("valueLabel", label);
         }
-        // Get battery voltage
-        const battery = this.placedComponents.find(
-          (c) => c.getData("logicComponent")?.type === "battery"
-        );
-        const voltage = battery ? battery.getData("logicComponent").voltage : 0;
-        label.setText(this.sim ? `${voltage.toFixed(1)} V` : "0 V");
+        // Use the voltmeter's own voltage value (set by simulation based on connection)
+        const voltage = logicComp.isConnected ? (logicComp.voltage || 0) : 0;
+        console.log(`Voltmeter ${logicComp.id}: isConnected=${logicComp.isConnected}, voltage=${voltage.toFixed(2)} V`);
+        label.setText(voltage > 0 ? `${voltage.toFixed(1)} V` : "0 V");
       }
     }
   }
@@ -1793,16 +1900,18 @@ case "voltmeter":
       component.setScale(1);
     });
 
-    // Label
-    const label = this.add
-      .text(0, 30, type, {
-        fontSize: "11px",
-        color: "#fff",
-        backgroundColor: "#00000088",
-        padding: { x: 4, y: 2 },
-      })
-      .setOrigin(0.5);
-    component.add(label);
+    // Label - only show for panel components
+    if (isInPanel) {
+      const label = this.add
+        .text(0, 30, type, {
+          fontSize: "11px",
+          color: "#fff",
+          backgroundColor: "#00000088",
+          padding: { x: 4, y: 2 },
+        })
+        .setOrigin(0.5);
+      component.add(label);
+    }
 
     component.setSize(70, 70);
     component.setInteractive({ draggable: true, useHandCursor: true });
@@ -1817,6 +1926,12 @@ case "voltmeter":
     if (comp) component.setData("logicComponent", comp);
     if (componentImage) component.setData("componentImage", componentImage);
     component.setData("isDragging", false);
+
+    // Panel components should stay fixed on screen when camera moves
+    if (isInPanel) {
+      component.setScrollFactor(0);
+      component.setDepth(801);
+    }
 
     this.input.setDraggable(component);
 
@@ -1834,14 +1949,25 @@ case "voltmeter":
     });
 
     component.on("drag", (pointer, dragX, dragY) => {
-      component.x = dragX;
-      component.y = dragY;
+      // For panel components (scrollFactor 0), use screen coordinates during drag
+      // For workbench components, use the provided drag coordinates
+      if (component.getData("isInPanel")) {
+        component.x = pointer.x;
+        component.y = pointer.y;
+      } else {
+        component.x = dragX;
+        component.y = dragY;
+      }
     });
 
     component.on("dragend", () => {
       this.currentlyDraggedComponent = null;
-      const isInPanel = component.x < 200;
       const wasInPanel = component.getData("isInPanel");
+      
+      // For panel components, check screen X position; for workbench components, check world position
+      const screenX = wasInPanel ? component.x : component.x - this.cameras.main.scrollX;
+      const isInPanel = screenX < 200;
+      
       const dragStartX = component.getData("dragStartX");
       const dragStartY = component.getData("dragStartY");
 
@@ -1854,8 +1980,10 @@ case "voltmeter":
         component.destroy();
         this.rebuildGraph();
       } else if (!isInPanel && wasInPanel) {
-        // s strani na mizo
-        const snapped = this.snapToGrid(component.x, component.y);
+        // s strani na mizo - convert screen coordinates to world coordinates
+        const worldX = component.x + this.cameras.main.scrollX;
+        const worldY = component.y + this.cameras.main.scrollY;
+        const snapped = this.snapToGrid(worldX, worldY);
         component.x = snapped.x;
         component.y = snapped.y;
 
@@ -1876,6 +2004,16 @@ case "voltmeter":
 
         component.setData("isRotated", false);
         component.setData("isInPanel", false);
+        // Remove scroll factor when moving to workbench so it moves with camera
+        component.setScrollFactor(1);
+        component.setDepth(0);
+        
+        // Remove the label when placing on workbench
+        const label = component.list.find(child => child.type === 'Text' && child.text === component.getData("type"));
+        if (label) {
+          component.remove(label, true);
+        }
+        
         this.placedComponents.push(component);
 
         this.createComponent(
@@ -1974,7 +2112,25 @@ case "voltmeter":
   }
 
   async checkCircuit() {
-    const currentChallenge = this.challenges[this.currentChallengeIndex];
+    // In sandbox mode, just run simulation and show result
+    if (this.isSandboxMode) {
+      this.rebuildGraph();
+      if (this.sim) {
+        this.checkText.setStyle({ color: "#00aa00" });
+        this.checkText.setText("Električni krog je sklenjen! ✓");
+      } else {
+        this.checkText.setStyle({ color: "#cc0000" });
+        this.checkText.setText("Električni krog ni sklenjen.");
+      }
+      return;
+    }
+    
+    // Challenge mode logic
+    const currentChallenge = this.currentChallenge;
+    if (!currentChallenge || !currentChallenge.requiredComponents) {
+      this.checkText.setText("Naloga ni naložena.");
+      return;
+    }
     const placedTypes = this.placedComponents.map((comp) =>
       comp.getData("type")
     );
@@ -2047,16 +2203,8 @@ case "voltmeter":
     );
     this.checkText.setText("");
 
-    if (this.currentChallengeIndex < this.challenges.length) {
-      this.promptText.setText(
-        this.challenges[this.currentChallengeIndex].prompt
-      );
-      this.updateMissingLabel();
-    } else {
-      this.promptText.setText("Vse naloge so uspešno opravljene! Čestitke!");
-      this.missingText.setText("");
-      localStorage.removeItem("currentChallengeIndex");
-    }
+    // Fetch the next challenge from the API
+    this.fetchCurrentChallenge();
   }
 
   async addPoints(points) {
@@ -2065,7 +2213,7 @@ case "voltmeter":
 
     // Offline fallback: use local challenge points if available, else 10
     if (!token) {
-      const offlinePoints = this.challenges[this.currentChallengeIndex]?.points ?? 10;
+      const offlinePoints = this.currentChallenge?.points ?? 10;
       const users = JSON.parse(localStorage.getItem("users")) || [];
       const userData = users.find((u) => u.username === username);
       if (userData) {
@@ -2135,7 +2283,8 @@ case "voltmeter":
     this.theoryBack = this.add
       .rectangle(width / 2, height / 2, width - 100, 150, 0x000000, 0.8)
       .setOrigin(0.5)
-      .setDepth(10);
+      .setScrollFactor(0)
+      .setDepth(1000);
 
     this.theoryText = this.add
       .text(width / 2, height / 2, theoryText, {
@@ -2146,7 +2295,8 @@ case "voltmeter":
         wordWrap: { width: width - 150 },
       })
       .setOrigin(0.5)
-      .setDepth(11);
+      .setScrollFactor(0)
+      .setDepth(1001);
 
     this.continueButton = this.add
       .text(width / 2, height / 2 + 70, "Nadaljuj", {
@@ -2156,7 +2306,8 @@ case "voltmeter":
         padding: { x: 20, y: 10 },
       })
       .setOrigin(0.5)
-      .setDepth(11)
+      .setScrollFactor(0)
+      .setDepth(1001)
       .setInteractive({ useHandCursor: true })
       .on("pointerover", () =>
         this.continueButton.setStyle({ color: "#0044cc" })
@@ -2837,5 +2988,121 @@ case "voltmeter":
         cancelBtn.emit('pointerdown');
       }
     });
+  }
+
+  setupCameraDragging() {
+    let isDraggingCamera = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let cameraStartX = 0;
+    let cameraStartY = 0;
+
+    this.input.on("pointerdown", (pointer) => {
+      // Only drag camera with middle mouse button
+      if (pointer.middleButtonDown()) {
+        isDraggingCamera = true;
+        dragStartX = pointer.x;
+        dragStartY = pointer.y;
+        cameraStartX = this.cameras.main.scrollX;
+        cameraStartY = this.cameras.main.scrollY;
+        this.input.setDefaultCursor('grab');
+      }
+    });
+
+    this.input.on("pointermove", (pointer) => {
+      if (isDraggingCamera) {
+        const deltaX = dragStartX - pointer.x;
+        const deltaY = dragStartY - pointer.y;
+        this.cameras.main.scrollX = cameraStartX + deltaX;
+        this.cameras.main.scrollY = cameraStartY + deltaY;
+      }
+    });
+
+    this.input.on("pointerup", (pointer) => {
+      if (isDraggingCamera) {
+        isDraggingCamera = false;
+        this.input.setDefaultCursor('default');
+      }
+    });
+
+    // Disable mouse wheel scrolling/zooming
+    this.input.on("wheel", (pointer, gameObjects, deltaX, deltaY, deltaZ) => {
+      // Mouse wheel disabled - do nothing
+      return;
+    });
+  }
+
+  handleResize(gameSize) {
+    // Clear any pending resize timer
+    if (this.resizeTimer) {
+      clearTimeout(this.resizeTimer);
+    }
+
+    // Wait for resize to finish (user stops dragging) before repositioning
+    this.resizeTimer = setTimeout(() => {
+      this.doResize(gameSize);
+    }, 250); // Wait 250ms after last resize event
+  }
+
+  doResize(gameSize) {
+    // Only resize if scene is still active
+    if (!this.scene.isActive()) {
+      return;
+    }
+
+    try {
+      const { width, height } = gameSize;
+      
+      // Resize left panel height
+      if (this.leftPanel) {
+        this.leftPanel.setDisplaySize(this.panelWidth, height);
+      }
+      if (this.leftPanelOverlay) {
+        this.leftPanelOverlay.setDisplaySize(this.panelWidth, height);
+      }
+      
+      // Reposition prompt text (challenge mode)
+      if (this.promptText) {
+        this.promptText.setPosition(width / 1.8, height - 30);
+      }
+      
+      // Reposition check text
+      if (this.checkText) {
+        this.checkText.setPosition(width / 2, this.mode === 'sandbox' ? 70 : height - 70);
+      }
+      
+      // Reposition missing text (challenge mode)
+      if (this.missingText) {
+        this.missingText.setPosition(width / 2, height - 100);
+      }
+      
+      // Reposition title text
+      if (this.titleText) {
+        this.titleText.setPosition(width / 2 + 50, 30);
+      }
+      
+      // Reposition UI buttons (top right)
+      if (this.uiButtons) {
+        const buttonWidth = 180;
+        const buttonHeight = 45;
+        const cornerRadius = 10;
+        
+        for (const button of this.uiButtons) {
+          const newX = width - button.xOffset;
+          button.text.setPosition(newX, button.y);
+          button.bg.clear();
+          button.bg.fillStyle(0x3399ff, 1);
+          button.bg.fillRoundedRect(
+            newX - buttonWidth / 2,
+            button.y - buttonHeight / 2,
+            buttonWidth,
+            buttonHeight,
+            cornerRadius
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Error during resize:', error);
+    }
   }
 }
