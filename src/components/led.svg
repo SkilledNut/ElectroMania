@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">
+  <!-- LED Symbol -->
+  <defs>
+    <marker id="arrowhead" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+      <polygon points="0 0, 6 3, 0 6" fill="#333"/>
+    </marker>
+  </defs>
+  
+  <!-- LED body (triangle pointing right) -->
+  <polygon points="20,20 60,40 20,60" fill="#ff4444" stroke="#333" stroke-width="2"/>
+  
+  <!-- Cathode line (right side) -->
+  <line x1="60" y1="20" x2="60" y2="60" stroke="#333" stroke-width="3"/>
+  
+  <!-- Connection lines -->
+  <line x1="10" y1="40" x2="20" y2="40" stroke="#333" stroke-width="2"/>
+  <line x1="60" y1="40" x2="70" y2="40" stroke="#333" stroke-width="2"/>
+  
+  <!-- Light rays -->
+  <line x1="45" y1="15" x2="55" y2="5" stroke="#333" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <line x1="50" y1="20" x2="60" y2="10" stroke="#333" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+</svg>
