@@ -429,14 +429,12 @@ export default class WorkspaceScene extends Phaser.Scene {
     // Setup camera dragging (works in both modes)
     this.setupCameraDragging();
 
+    // Create minimap for navigation
+    this.createMinimap();
+
     // Helper function for rotation
     const rotateComponent = (component, direction) => {
   if (!component) return;
-
-  const logicComp = component.getData("logicComponent");
-
-  // Don't rotate switches
-  if (logicComp && logicComp.type === "switch") return;
 
   // Get current rotation and calculate new rotation
   const currentRotation = component.getData("rotation") || 0;
@@ -605,6 +603,12 @@ export default class WorkspaceScene extends Phaser.Scene {
       this.deactivatePlacementMode();
     });
 
+    // Press Space to jump to nearest component
+    this.input.keyboard.on("keydown-SPACE", (event) => {
+      event.preventDefault();
+      this.jumpToNearestComponent();
+    });
+
     // Create grid highlight graphics
     this.gridHighlightGraphics = this.add.graphics();
     this.gridHighlightGraphics.setDepth(3);
@@ -619,6 +623,11 @@ export default class WorkspaceScene extends Phaser.Scene {
     console.log(JSON.parse(localStorage.getItem("users")));
   }
 
+  update() {
+    // Update minimap every frame
+    this.updateMinimap();
+  }
+
   handlePointerMove(pointer) {
     this.updatePlacementPreview(pointer);
 
@@ -628,9 +637,9 @@ export default class WorkspaceScene extends Phaser.Scene {
       this.pendingPlacement.y = snapped.y;
       this.updateLogicNodePositions(this.pendingPlacement);
       
-      // Update grid highlights and connection points for wires
+      // Update grid highlights and connection points for all components
+      this.updateGridHighlights(snapped.x, snapped.y);
       if (this.activePlacementType === "žica") {
-        this.updateGridHighlights(snapped.x, snapped.y);
         this.updateConnectionPoints(snapped.x, snapped.y);
       }
     }
@@ -666,16 +675,14 @@ export default class WorkspaceScene extends Phaser.Scene {
       return;
     }
 
-    // Check if placing a wire on top of another wire
-    if (this.activePlacementType === "žica") {
-      const snapped = this.snapToGrid(pointer.worldX, pointer.worldY);
-      const hasWireAtPosition = this.hasWireAtPosition(snapped.x, snapped.y, this.previewRotation);
-      
-      if (hasWireAtPosition) {
-        // Show visual feedback that placement is blocked
-        this.showPlacementBlockedFeedback(snapped.x, snapped.y);
-        return;
-      }
+    // Check if placing a component on top of another component of the same type
+    const snapped = this.snapToGrid(pointer.worldX, pointer.worldY);
+    const hasComponentAtPosition = this.hasComponentAtPosition(snapped.x, snapped.y, this.activePlacementType, this.previewRotation);
+    
+    if (hasComponentAtPosition) {
+      // Show visual feedback that placement is blocked
+      this.showPlacementBlockedFeedback(snapped.x, snapped.y);
+      return;
     }
 
     this.finalizeComponentPlacement(pointer);
@@ -683,10 +690,6 @@ export default class WorkspaceScene extends Phaser.Scene {
 
   togglePlacementMode(panelComponent) {
     if (!panelComponent) return;
-
-    // Only allow placement mode for wires
-    const componentType = panelComponent.getData("type");
-    if (componentType !== "žica") return;
 
     if (this.activePanelComponent === panelComponent) {
       this.deactivatePlacementMode();
@@ -914,13 +917,6 @@ export default class WorkspaceScene extends Phaser.Scene {
     const MOVE_PX_THRESHOLD = 10;
 
     if (clickDuration <= CLICK_MS_THRESHOLD && moved <= MOVE_PX_THRESHOLD) {
-      // If clicking a different component than wire, exit placement mode first
-      const componentType = component.getData("type");
-      if (componentType !== "žica" && this.activePlacementType) {
-        this.deactivatePlacementMode();
-        return;
-      }
-      
       this.togglePlacementMode(component);
     }
   }
@@ -933,11 +929,11 @@ export default class WorkspaceScene extends Phaser.Scene {
     
     if (!this.gridHighlightGraphics) return;
 
-    // Check if there's already a wire at this position with current rotation
-    const hasWire = this.hasWireAtPosition(x, y, this.previewRotation);
-    const color = hasWire ? 0xff0000 : 0x00ff00; // Red if blocked, green if available
-    const alpha = hasWire ? 0.9 : 0.8;
-    const fillAlpha = hasWire ? 0.25 : 0.15;
+    // Check if there's already a component at this position
+    const hasComponent = this.hasComponentAtPosition(x, y, this.activePlacementType, this.previewRotation);
+    const color = hasComponent ? 0xff0000 : 0x00ff00; // Red if blocked, green if available
+    const alpha = hasComponent ? 0.9 : 0.8;
+    const fillAlpha = hasComponent ? 0.25 : 0.15;
 
     // Draw a highlighted grid cell
     this.gridHighlightGraphics.clear();
@@ -945,38 +941,57 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.gridHighlightGraphics.fillStyle(color, fillAlpha);
     
     const halfGrid = this.gridSize / 2;
-    
-    // Highlight the wire span based on rotation
     const rotation = this.previewRotation || 0;
     const angle = rotation % 180;
     
-    if (angle === 0 || angle === 180) {
-      // Horizontal wire - highlight 2 cells wide
-      this.gridHighlightGraphics.fillRect(
-        x - this.gridSize,
-        y - halfGrid,
-        this.gridSize * 2,
-        this.gridSize
-      );
-      this.gridHighlightGraphics.strokeRect(
-        x - this.gridSize,
-        y - halfGrid,
-        this.gridSize * 2,
-        this.gridSize
-      );
+    // Different highlight sizes based on component type
+    if (this.activePlacementType === "žica") {
+      // Highlight the wire span based on rotation
+      if (angle === 0 || angle === 180) {
+        // Horizontal wire - highlight 2 cells wide
+        this.gridHighlightGraphics.fillRect(
+          x - this.gridSize,
+          y - halfGrid,
+          this.gridSize * 2,
+          this.gridSize
+        );
+        this.gridHighlightGraphics.strokeRect(
+          x - this.gridSize,
+          y - halfGrid,
+          this.gridSize * 2,
+          this.gridSize
+        );
+      } else {
+        // Vertical wire - highlight 2 cells tall
+        this.gridHighlightGraphics.fillRect(
+          x - halfGrid,
+          y - this.gridSize,
+          this.gridSize,
+          this.gridSize * 2
+        );
+        this.gridHighlightGraphics.strokeRect(
+          x - halfGrid,
+          y - this.gridSize,
+          this.gridSize,
+          this.gridSize * 2
+        );
+      }
     } else {
-      // Vertical wire - highlight 2 cells tall
+      // For other components - highlight a single grid cell (component size)
+      const componentSize = this.gridSize * 2; // Match typical component display size
+      const halfSize = componentSize / 2;
+      
       this.gridHighlightGraphics.fillRect(
-        x - halfGrid,
-        y - this.gridSize,
-        this.gridSize,
-        this.gridSize * 2
+        x - halfSize,
+        y - halfSize,
+        componentSize,
+        componentSize
       );
       this.gridHighlightGraphics.strokeRect(
-        x - halfGrid,
-        y - this.gridSize,
-        this.gridSize,
-        this.gridSize * 2
+        x - halfSize,
+        y - halfSize,
+        componentSize,
+        componentSize
       );
     }
   }
@@ -1056,6 +1071,52 @@ export default class WorkspaceScene extends Phaser.Scene {
     if (this.connectionPointGraphics) {
       this.connectionPointGraphics.clear();
     }
+  }
+
+  /**
+   * Check if a component of the specified type exists at the given position
+   */
+  hasComponentAtPosition(x, y, componentType, rotation = null) {
+    // For wires, use the specialized wire check
+    if (componentType === "žica") {
+      return this.hasWireAtPosition(x, y, rotation);
+    }
+    
+    // For other components, check if any component of the same type overlaps
+    const gridSize = this.gridSize || 40;
+    const componentSize = gridSize * 2; // Match the display size used in grid highlights
+    
+    // Map panel type to logic component type
+    const typeMapping = {
+      'baterija': 'battery',
+      'upor': 'resistor',
+      'svetilka': 'bulb',
+      'stikalo-on': 'switch',
+      'stikalo-off': 'switch',
+      'ammeter': 'ammeter',
+      'voltmeter': 'voltmeter'
+    };
+    
+    const logicType = typeMapping[componentType] || componentType;
+    
+    for (const component of this.placedComponents) {
+      const logicComp = component.getData("logicComponent");
+      if (!logicComp) continue;
+      
+      // Check if this is the same type of component
+      const existingLogicType = logicComp.type;
+      if (existingLogicType !== logicType) continue;
+      
+      const dx = Math.abs(component.x - x);
+      const dy = Math.abs(component.y - y);
+      
+      // Check if components overlap (bounding boxes intersect)
+      // Two squares of size componentSize overlap if their centers are within componentSize distance
+      if (dx < componentSize && dy < componentSize) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -1155,6 +1216,51 @@ export default class WorkspaceScene extends Phaser.Scene {
       onComplete: () => {
         flash.destroy();
         graphics.destroy();
+      }
+    });
+  }
+
+  /**
+   * Delete a component from the workbench
+   */
+  deleteComponent(component) {
+    if (!component || component.getData("isInPanel")) return;
+
+    const x = component.x;
+    const y = component.y;
+
+    // Remove from placedComponents array
+    const indexToRemove = this.placedComponents.indexOf(component);
+    if (indexToRemove > -1) {
+      this.placedComponents.splice(indexToRemove, 1);
+    }
+
+    // Destroy the component
+    component.destroy();
+
+    // Show deletion feedback
+    this.showDeletionFeedback(x, y);
+
+    // Rebuild the circuit graph
+    this.rebuildGraph();
+  }
+
+  /**
+   * Show visual feedback when a component is deleted
+   */
+  showDeletionFeedback(x, y) {
+    // Create a puff/disappear effect
+    const flash = this.add.circle(x, y, 25, 0xff6666, 0.8);
+    flash.setDepth(200);
+
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      scale: 2,
+      duration: 300,
+      ease: 'Cubic.easeOut',
+      onComplete: () => {
+        flash.destroy();
       }
     });
   }
@@ -2162,6 +2268,13 @@ case "voltmeter":
           this.showResistanceDialog(logicComp, component);
           this.time.delayedCall(500, () => { this.dialogCooldown = false; });
         }
+      }
+    });
+
+    // Right-click to delete component from workbench
+    component.on("pointerdown", (pointer) => {
+      if (pointer.rightButtonDown() && !component.getData("isInPanel")) {
+        this.deleteComponent(component);
       }
     });
 
@@ -3211,6 +3324,474 @@ case "voltmeter":
     });
   }
 
+  /**
+   * Create a minimap for navigation in the infinite workspace
+   */
+  createMinimap() {
+    const { width, height } = this.cameras.main;
+    
+    // Minimap size modes: small (default) and large (toggled with M)
+    this.minimapExpanded = false;
+    this.minimapSmallWidth = 180;
+    this.minimapSmallHeight = 140;
+    this.minimapLargeWidth = 350;
+    this.minimapLargeHeight = 280;
+    
+    // Current size
+    this.minimapWidth = this.minimapSmallWidth;
+    this.minimapHeight = this.minimapSmallHeight;
+    this.minimapPadding = 15;
+    this.minimapX = width - this.minimapWidth - this.minimapPadding;
+    this.minimapY = height - this.minimapHeight - this.minimapPadding;
+    
+    // Calculate scale factor for minimap
+    this.minimapScaleX = this.minimapWidth / this.canvasWidth;
+    this.minimapScaleY = this.minimapHeight / this.canvasHeight;
+    
+    // Create minimap container (fixed to screen)
+    this.minimapContainer = this.add.container(this.minimapX, this.minimapY);
+    this.minimapContainer.setScrollFactor(0);
+    this.minimapContainer.setDepth(950);
+    
+    // Minimap background
+    this.minimapBg = this.add.rectangle(
+      0, 0,
+      this.minimapWidth, this.minimapHeight,
+      0xd4c4a8, 1
+    ).setOrigin(0);
+    this.minimapBg.setStrokeStyle(2, 0x4a3c2a);
+    this.minimapContainer.add(this.minimapBg);
+    
+    // Minimap grid graphics (will be redrawn on resize)
+    this.minimapGrid = this.add.graphics();
+    this.minimapContainer.add(this.minimapGrid);
+    this.drawMinimapGrid();
+    
+    // Graphics for component dots
+    this.minimapComponentsGraphics = this.add.graphics();
+    this.minimapContainer.add(this.minimapComponentsGraphics);
+    
+    // Viewport indicator (shows current camera view)
+    this.minimapViewport = this.add.graphics();
+    this.minimapContainer.add(this.minimapViewport);
+    
+    // Center indicator graphics (will be redrawn on resize)
+    this.minimapCenterMarker = this.add.graphics();
+    this.minimapContainer.add(this.minimapCenterMarker);
+    this.drawMinimapCenterMarker();
+    
+    // Minimap label
+    this.minimapLabel = this.add.text(
+      this.minimapWidth / 2, -10,
+      "Zemljevid (M za povečavo)",
+      {
+        fontSize: "11px",
+        color: "#333",
+        fontStyle: "bold",
+        backgroundColor: "#ffffffdd",
+        padding: { x: 6, y: 2 }
+      }
+    ).setOrigin(0.5);
+    this.minimapContainer.add(this.minimapLabel);
+    
+    // Create legend container (shown when expanded)
+    this.createMinimapLegend();
+    
+    // Create a separate interactive zone for minimap (not inside container for better input handling)
+    this.minimapInteractiveZone = this.add.zone(
+      this.minimapX, this.minimapY,
+      this.minimapWidth, this.minimapHeight
+    ).setOrigin(0).setScrollFactor(0).setDepth(951).setInteractive({ useHandCursor: true });
+    
+    // Track if we're dragging on minimap
+    this.isDraggingMinimap = false;
+    
+    this.minimapInteractiveZone.on("pointerdown", (pointer) => {
+      this.isDraggingMinimap = true;
+      const localX = pointer.x - this.minimapX;
+      const localY = pointer.y - this.minimapY;
+      this.moveCameraFromMinimapLocal(localX, localY);
+    });
+    
+    this.minimapInteractiveZone.on("pointermove", (pointer) => {
+      if (this.isDraggingMinimap && pointer.isDown) {
+        const localX = pointer.x - this.minimapX;
+        const localY = pointer.y - this.minimapY;
+        this.moveCameraFromMinimapLocal(localX, localY);
+      }
+    });
+    
+    this.minimapInteractiveZone.on("pointerup", () => {
+      this.isDraggingMinimap = false;
+    });
+    
+    // Scene-level handler for releasing outside minimap
+    this.input.on("pointerup", () => {
+      this.isDraggingMinimap = false;
+    });
+    
+    // Toggle minimap size with M key
+    this.input.keyboard.on("keydown-M", () => {
+      this.toggleMinimapSize();
+    });
+  }
+
+  /**
+   * Move camera based on local minimap coordinates
+   */
+  moveCameraFromMinimapLocal(localX, localY) {
+    // Clamp to minimap bounds
+    const clampedX = Math.max(0, Math.min(localX, this.minimapWidth));
+    const clampedY = Math.max(0, Math.min(localY, this.minimapHeight));
+    
+    // Convert minimap position to world position
+    const worldX = clampedX / this.minimapScaleX;
+    const worldY = clampedY / this.minimapScaleY;
+    
+    // Center camera on position
+    const { width, height } = this.cameras.main;
+    this.cameras.main.scrollX = worldX - width / 2;
+    this.cameras.main.scrollY = worldY - height / 2;
+  }
+
+  /**
+   * Create the legend for minimap colors
+   */
+  createMinimapLegend() {
+    this.minimapLegendContainer = this.add.container(0, this.minimapHeight + 5);
+    this.minimapLegendContainer.setVisible(false); // Hidden by default
+    this.minimapContainer.add(this.minimapLegendContainer);
+    
+    // Legend background
+    const legendWidth = this.minimapWidth;
+    const legendHeight = 95;
+    const legendBg = this.add.rectangle(0, 0, legendWidth, legendHeight, 0xffffff, 0.95).setOrigin(0);
+    legendBg.setStrokeStyle(2, 0x4a3c2a);
+    this.minimapLegendContainer.add(legendBg);
+    
+    // Legend title
+    const legendTitle = this.add.text(legendWidth / 2, 8, "Legenda", {
+      fontSize: "12px",
+      color: "#333",
+      fontStyle: "bold"
+    }).setOrigin(0.5, 0);
+    this.minimapLegendContainer.add(legendTitle);
+    
+    // Color mapping for component types
+    const legendItems = [
+      { color: 0xffcc00, label: "Baterija" },
+      { color: 0xff6600, label: "Upor" },
+      { color: 0xff4444, label: "Svetilka" },
+      { color: 0x666666, label: "Stikalo" },
+      { color: 0x0066cc, label: "Žica" },
+      { color: 0x00cc66, label: "Ampermeter" },
+      { color: 0x9900cc, label: "Voltmeter" }
+    ];
+    
+    const startY = 26;
+    const itemHeight = 10;
+    const col1X = 10;
+    const col2X = legendWidth / 2 + 5;
+    
+    legendItems.forEach((item, index) => {
+      const col = index < 4 ? 0 : 1;
+      const row = index < 4 ? index : index - 4;
+      const x = col === 0 ? col1X : col2X;
+      const y = startY + row * itemHeight;
+      
+      // Color dot
+      const dot = this.add.circle(x + 5, y + 4, 4, item.color);
+      this.minimapLegendContainer.add(dot);
+      
+      // Label
+      const label = this.add.text(x + 14, y, item.label, {
+        fontSize: "9px",
+        color: "#333"
+      });
+      this.minimapLegendContainer.add(label);
+    });
+  }
+
+  /**
+   * Toggle minimap between small and large size
+   */
+  toggleMinimapSize() {
+    const { width, height } = this.cameras.main;
+    
+    this.minimapExpanded = !this.minimapExpanded;
+    
+    if (this.minimapExpanded) {
+      this.minimapWidth = this.minimapLargeWidth;
+      this.minimapHeight = this.minimapLargeHeight;
+    } else {
+      this.minimapWidth = this.minimapSmallWidth;
+      this.minimapHeight = this.minimapSmallHeight;
+    }
+    
+    // Update position
+    this.minimapX = width - this.minimapWidth - this.minimapPadding;
+    this.minimapY = height - this.minimapHeight - this.minimapPadding - (this.minimapExpanded ? 100 : 0);
+    this.minimapContainer.setPosition(this.minimapX, this.minimapY);
+    
+    // Update scale factors
+    this.minimapScaleX = this.minimapWidth / this.canvasWidth;
+    this.minimapScaleY = this.minimapHeight / this.canvasHeight;
+    
+    // Resize background
+    this.minimapBg.setSize(this.minimapWidth, this.minimapHeight);
+    
+    // Update interactive zone position and size
+    this.minimapInteractiveZone.setPosition(this.minimapX, this.minimapY);
+    this.minimapInteractiveZone.setSize(this.minimapWidth, this.minimapHeight);
+    this.minimapInteractiveZone.input.hitArea.setTo(0, 0, this.minimapWidth, this.minimapHeight);
+    
+    // Redraw grid
+    this.drawMinimapGrid();
+    
+    // Redraw center marker
+    this.drawMinimapCenterMarker();
+    
+    // Update label position and text
+    this.minimapLabel.setPosition(this.minimapWidth / 2, -10);
+    this.minimapLabel.setText(this.minimapExpanded ? "Zemljevid (M za pomanjšavo)" : "Zemljevid (M za povečavo)");
+    
+    // Update legend position and visibility
+    this.minimapLegendContainer.setPosition(0, this.minimapHeight + 5);
+    this.minimapLegendContainer.setVisible(this.minimapExpanded);
+    
+    // Update legend background width
+    if (this.minimapLegendContainer.list[0]) {
+      this.minimapLegendContainer.list[0].setSize(this.minimapWidth, 95);
+    }
+    // Update legend title position
+    if (this.minimapLegendContainer.list[1]) {
+      this.minimapLegendContainer.list[1].setPosition(this.minimapWidth / 2, 8);
+    }
+  }
+
+  /**
+   * Draw minimap grid lines
+   */
+  drawMinimapGrid() {
+    this.minimapGrid.clear();
+    this.minimapGrid.lineStyle(1, 0x8b7355, 0.3);
+    const gridStep = this.minimapExpanded ? 25 : 20;
+    for (let x = 0; x <= this.minimapWidth; x += gridStep) {
+      this.minimapGrid.beginPath();
+      this.minimapGrid.moveTo(x, 0);
+      this.minimapGrid.lineTo(x, this.minimapHeight);
+      this.minimapGrid.strokePath();
+    }
+    for (let y = 0; y <= this.minimapHeight; y += gridStep) {
+      this.minimapGrid.beginPath();
+      this.minimapGrid.moveTo(0, y);
+      this.minimapGrid.lineTo(this.minimapWidth, y);
+      this.minimapGrid.strokePath();
+    }
+  }
+
+  /**
+   * Draw center marker on minimap
+   */
+  drawMinimapCenterMarker() {
+    this.minimapCenterMarker.clear();
+    const centerX = (this.canvasWidth / 2) * this.minimapScaleX;
+    const centerY = (this.canvasHeight / 2) * this.minimapScaleY;
+    this.minimapCenterMarker.lineStyle(1, 0x666666, 0.5);
+    this.minimapCenterMarker.beginPath();
+    this.minimapCenterMarker.moveTo(centerX - 5, centerY);
+    this.minimapCenterMarker.lineTo(centerX + 5, centerY);
+    this.minimapCenterMarker.moveTo(centerX, centerY - 5);
+    this.minimapCenterMarker.lineTo(centerX, centerY + 5);
+    this.minimapCenterMarker.strokePath();
+  }
+
+  /**
+   * Update minimap to show current viewport and components
+   */
+  updateMinimap() {
+    if (!this.minimapContainer || !this.minimapContainer.visible) return;
+    
+    const camera = this.cameras.main;
+    const { width, height } = camera;
+    
+    // Update viewport indicator
+    this.minimapViewport.clear();
+    this.minimapViewport.lineStyle(2, 0x3399ff, 1);
+    this.minimapViewport.fillStyle(0x3399ff, 0.2);
+    
+    const vpX = camera.scrollX * this.minimapScaleX;
+    const vpY = camera.scrollY * this.minimapScaleY;
+    const vpW = width * this.minimapScaleX;
+    const vpH = height * this.minimapScaleY;
+    
+    this.minimapViewport.fillRect(vpX, vpY, vpW, vpH);
+    this.minimapViewport.strokeRect(vpX, vpY, vpW, vpH);
+    
+    // Update component dots
+    this.minimapComponentsGraphics.clear();
+    
+    // Color mapping for component types
+    const colorMap = {
+      battery: 0xffcc00,
+      resistor: 0xff6600,
+      bulb: 0xff4444,
+      switch: 0x666666,
+      wire: 0x0066cc,
+      ammeter: 0x00cc66,
+      voltmeter: 0x9900cc
+    };
+    
+    const dotSize = this.minimapExpanded ? 5 : 4;
+    
+    for (const component of this.placedComponents) {
+      if (component.getData("isInPanel")) continue;
+      
+      const logicComp = component.getData("logicComponent");
+      const type = logicComp?.type || "wire";
+      const color = colorMap[type] || 0xffffff;
+      
+      const dotX = component.x * this.minimapScaleX;
+      const dotY = component.y * this.minimapScaleY;
+      
+      // Draw colored dot with white outline for visibility
+      this.minimapComponentsGraphics.lineStyle(1, 0xffffff, 0.8);
+      this.minimapComponentsGraphics.fillStyle(color, 1);
+      this.minimapComponentsGraphics.fillCircle(dotX, dotY, dotSize);
+      this.minimapComponentsGraphics.strokeCircle(dotX, dotY, dotSize);
+    }
+  }
+
+  /**
+   * Jump camera to the nearest placed component from current view center
+   */
+  jumpToNearestComponent() {
+    // Filter only workbench components (not panel components)
+    const workbenchComponents = this.placedComponents.filter(
+      comp => !comp.getData("isInPanel")
+    );
+    
+    if (workbenchComponents.length === 0) {
+      // No components placed - show message
+      this.showJumpFeedback("Ni komponent na mizi!", 0xff6666);
+      return;
+    }
+    
+    const camera = this.cameras.main;
+    const { width, height } = camera;
+    
+    // Current center of the viewport in world coordinates
+    const viewCenterX = camera.scrollX + width / 2;
+    const viewCenterY = camera.scrollY + height / 2;
+    
+    // Find the nearest component
+    let nearestComponent = null;
+    let nearestDistance = Infinity;
+    
+    for (const component of workbenchComponents) {
+      const dx = component.x - viewCenterX;
+      const dy = component.y - viewCenterY;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      // Skip components that are already very close to center (within 50px)
+      if (distance < 50) continue;
+      
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestComponent = component;
+      }
+    }
+    
+    // If all components are already centered, find any component
+    if (!nearestComponent && workbenchComponents.length > 0) {
+      nearestComponent = workbenchComponents[0];
+    }
+    
+    if (nearestComponent) {
+      // Animate camera to the component
+      const targetScrollX = nearestComponent.x - width / 2;
+      const targetScrollY = nearestComponent.y - height / 2;
+      
+      this.tweens.add({
+        targets: camera,
+        scrollX: targetScrollX,
+        scrollY: targetScrollY,
+        duration: 300,
+        ease: 'Cubic.easeOut',
+        onComplete: () => {
+          // Flash the component to highlight it
+          this.highlightComponent(nearestComponent);
+        }
+      });
+      
+      // Show component type
+      const logicComp = nearestComponent.getData("logicComponent");
+      const typeNames = {
+        battery: "Baterija",
+        resistor: "Upor",
+        bulb: "Svetilka",
+        switch: "Stikalo",
+        wire: "Žica",
+        ammeter: "Ampermeter",
+        voltmeter: "Voltmeter"
+      };
+      const typeName = typeNames[logicComp?.type] || "Komponenta";
+      this.showJumpFeedback(`→ ${typeName}`, 0x3399ff);
+    }
+  }
+
+  /**
+   * Highlight a component with a brief flash effect
+   */
+  highlightComponent(component) {
+    if (!component) return;
+    
+    // Create a highlight circle around the component
+    const highlight = this.add.circle(component.x, component.y, 60, 0x3399ff, 0.3);
+    highlight.setDepth(100);
+    
+    this.tweens.add({
+      targets: highlight,
+      alpha: 0,
+      scale: 1.5,
+      duration: 500,
+      ease: 'Cubic.easeOut',
+      onComplete: () => {
+        highlight.destroy();
+      }
+    });
+  }
+
+  /**
+   * Show feedback text when jumping to component
+   */
+  showJumpFeedback(message, color) {
+    const { width } = this.cameras.main;
+    
+    const feedback = this.add.text(width / 2, 100, message, {
+      fontSize: "18px",
+      color: "#ffffff",
+      fontStyle: "bold",
+      backgroundColor: `#${color.toString(16).padStart(6, '0')}`,
+      padding: { x: 15, y: 8 }
+    })
+    .setOrigin(0.5)
+    .setScrollFactor(0)
+    .setDepth(1000);
+    
+    this.tweens.add({
+      targets: feedback,
+      alpha: 0,
+      y: 80,
+      duration: 1000,
+      delay: 500,
+      ease: 'Cubic.easeOut',
+      onComplete: () => {
+        feedback.destroy();
+      }
+    });
+  }
+
   setupCameraDragging() {
     let isDraggingCamera = false;
     let dragStartX = 0;
@@ -3320,6 +3901,18 @@ case "voltmeter":
             buttonHeight,
             cornerRadius
           );
+        }
+      }
+      
+      // Reposition minimap (bottom right)
+      if (this.minimapContainer) {
+        this.minimapX = width - this.minimapWidth - this.minimapPadding;
+        this.minimapY = height - this.minimapHeight - this.minimapPadding - (this.minimapExpanded ? 100 : 0);
+        this.minimapContainer.setPosition(this.minimapX, this.minimapY);
+        
+        // Also update the interactive zone position
+        if (this.minimapInteractiveZone) {
+          this.minimapInteractiveZone.setPosition(this.minimapX, this.minimapY);
         }
       }
     } catch (error) {

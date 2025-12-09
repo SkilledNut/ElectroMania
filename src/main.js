@@ -38,6 +38,13 @@ const config = {
   scale: {
     mode: Phaser.Scale.RESIZE,      
     autoCenter: Phaser.Scale.CENTER_BOTH
+  },
+  input: {
+    mouse: {
+      preventDefaultDown: true,
+      preventDefaultUp: true,
+      preventDefaultMove: true
+    }
   }
 };
 
@@ -51,5 +58,12 @@ window.addEventListener('wheel', (e) => {
     e.preventDefault();
   }
 }, { passive: false });
+
+// Disable context menu (right-click menu) on the game canvas
+window.addEventListener('contextmenu', (e) => {
+  if (e.target.tagName === 'CANVAS' || e.target.closest('#game-container')) {
+    e.preventDefault();
+  }
+});
 
 export default game;
