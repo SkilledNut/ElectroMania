@@ -1006,6 +1006,8 @@ export default class WorkspaceScene extends Phaser.Scene {
       žica: "žica",
       ammeter: "ammeter",
       voltmeter: "voltmeter",
+      led: "led",
+      fuse: "fuse",
     };
     return textureMap[type] || null;
   }
@@ -2710,12 +2712,22 @@ export default class WorkspaceScene extends Phaser.Scene {
 
         this.placedComponents.push(component);
 
-        this.createComponent(
+        // Find the index of this component in panelComponentObjects before creating replacement
+        const panelIndex = this.panelComponentObjects.indexOf(component);
+
+        const newPanelComponent = this.createComponent(
           component.getData("originalX"),
           component.getData("originalY"),
           component.getData("type"),
           component.getData("color")
         );
+
+        // Update panelComponentObjects with the new component
+        if (panelIndex > -1 && newPanelComponent) {
+          this.panelComponentObjects[panelIndex] = newPanelComponent;
+          // Re-apply scroll position to ensure new component is at correct visual position
+          this.updatePanelScroll();
+        }
 
         this.rebuildGraph();
       } else if (!wasInPanel) {
@@ -2739,10 +2751,11 @@ export default class WorkspaceScene extends Phaser.Scene {
         }
         this.rebuildGraph();
       } else {
-        // postavi se nazaj na originalno mesto
+        // Panel component stayed in panel - restore to correct scrolled position
         component.x = component.getData("originalX");
         component.y = component.getData("originalY");
-        this.rebuildGraph();
+        // Re-apply scroll position to ensure component is at correct visual position
+        this.updatePanelScroll();
       }
 
       this.time.delayedCall(500, () => {
@@ -5729,7 +5742,7 @@ export default class WorkspaceScene extends Phaser.Scene {
 
     // Legend background
     const legendWidth = this.minimapWidth;
-    const legendHeight = 95;
+    const legendHeight = 115;
     const legendBg = this.add
       .rectangle(0, 0, legendWidth, legendHeight, 0xffffff, 0.95)
       .setOrigin(0);
@@ -5755,6 +5768,8 @@ export default class WorkspaceScene extends Phaser.Scene {
       { color: 0x0066cc, label: "Žica" },
       { color: 0x00cc66, label: "Ampermeter" },
       { color: 0x9900cc, label: "Voltmeter" },
+      { color: 0xff3333, label: "LED" },
+      { color: 0xcccccc, label: "Varovalka" },
     ];
 
     const startY = 26;
@@ -5763,8 +5778,8 @@ export default class WorkspaceScene extends Phaser.Scene {
     const col2X = legendWidth / 2 + 5;
 
     legendItems.forEach((item, index) => {
-      const col = index < 4 ? 0 : 1;
-      const row = index < 4 ? index : index - 4;
+      const col = index < 5 ? 0 : 1;
+      const row = index < 5 ? index : index - 5;
       const x = col === 0 ? col1X : col2X;
       const y = startY + row * itemHeight;
 
@@ -5966,6 +5981,8 @@ export default class WorkspaceScene extends Phaser.Scene {
       wire: 0x0066cc,
       ammeter: 0x00cc66,
       voltmeter: 0x9900cc,
+      led: 0xff3333,
+      fuse: 0xcccccc,
     };
 
     const dotSize = this.minimapExpanded ? 5 : 4;
