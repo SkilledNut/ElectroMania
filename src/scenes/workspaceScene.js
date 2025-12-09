@@ -23,9 +23,10 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.previewRotation = 0;
   }
 
-  init() {
+  init(data) {
     const savedIndex = localStorage.getItem("currentChallengeIndex");
     this.currentChallengeIndex = savedIndex !== null ? parseInt(savedIndex) : 0;
+    this.isSandboxMode = data?.mode === 'sandbox';
   }
 
   preload() {
@@ -250,10 +251,12 @@ export default class WorkspaceScene extends Phaser.Scene {
     );
     makeButton(width - 140, 125, "Preveri krog", () => this.checkCircuit());
     
-    // Sandbox buttons
-    makeButton(width - 140, 185, "Shrani", () => this.showSaveDialog());
-    makeButton(width - 140, 235, "Naloži", () => this.showLoadDialog());
-    makeButton(width - 140, 285, "Počisti", () => this.clearSandbox());
+    // Sandbox buttons - only show in sandbox mode
+    if (this.isSandboxMode) {
+      makeButton(width - 140, 190, "Shrani", () => this.showSaveDialog());
+      makeButton(width - 140, 245, "Naloži", () => this.showLoadDialog());
+      makeButton(width - 140, 300, "Počisti", () => this.clearSandbox());
+    }
 
     // stranska vrstica na levi
     const panelWidth = 150;
@@ -2503,7 +2506,7 @@ case "voltmeter":
 
     // Dialog
     const dialogWidth = 400;
-    const dialogHeight = 200;
+    const dialogHeight = 220;
     const dialogBg = this.add.graphics();
     dialogBg.setDepth(2001).setScrollFactor(0);
     dialogBg.fillStyle(0xffffff, 1);
@@ -2554,7 +2557,7 @@ case "voltmeter":
     // Buttons
     const buttonWidth = 120;
     const buttonHeight = 40;
-    const buttonY = height / 2 + 50;
+    const buttonY = height / 2 + 65;
 
     const cancelBg = this.add.graphics().setDepth(2001).setScrollFactor(0);
     cancelBg.fillStyle(0xcccccc, 1);
