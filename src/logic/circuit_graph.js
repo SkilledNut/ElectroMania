@@ -66,6 +66,28 @@ class CircuitGraph {
       return !isBurnedOut;
     }
 
+    // LED conductivity - check if burned out and if forward biased
+    // LEDs only conduct when current flows from anode (start) to cathode (end)
+    if (comp.type === "led") {
+      const isBurnedOut = comp.originalComponent?.isBurnedOut || false;
+      if (isBurnedOut) return false;
+      
+      // Check polarity - entryTerminal is set during BFS traversal
+      // LED conducts only if we enter from 'start' (anode) terminal
+      // If entryTerminal is not set, we're just checking general conductivity
+      if (comp.entryTerminal !== undefined) {
+        const isForwardBiased = comp.entryTerminal === 'start';
+        return isForwardBiased;
+      }
+      return true; // Default to conductive if not checking polarity
+    }
+
+    // Fuse conductivity - check if blown
+    if (comp.type === "fuse") {
+      const isBlown = comp.originalComponent?.isBlown || false;
+      return !isBlown;
+    }
+
     // Wires, resistors, and ammeters conduct
     return ["wire", "resistor", "ammeter"].includes(comp.type);
   }
@@ -238,12 +260,26 @@ class CircuitGraph {
             continue;
           }
 
+          // For LEDs, set the entry terminal to check polarity
+          if (component.type === "led") {
+            component.entryTerminal = terminal;
+          }
+
           // Skip non-conductive components
           if (!this.isConductive(component)) {
             console.log(
-              `[Graph]   Skip ${component.type}(${component.id}) - not conductive`
+              `[Graph]   Skip ${component.type}(${component.id}) - not conductive${component.type === 'led' ? ' (reverse biased or burned out)' : ''}`
             );
+            // Clear entry terminal after check
+            if (component.type === "led") {
+              delete component.entryTerminal;
+            }
             continue;
+          }
+          
+          // Clear entry terminal after check
+          if (component.type === "led") {
+            delete component.entryTerminal;
           }
 
           // Traverse to the other end of this component
@@ -446,6 +482,14 @@ class CircuitGraph {
       } else if (comp.type === "ammeter") {
         // Ammeters have negligible resistance (0.01Ω)
         totalResistance += 0.01;
+      } else if (comp.type === "fuse") {
+        // Fuses have very small resistance (0.01Ω)
+        totalResistance += 0.01;
+      } else if (comp.type === "led") {
+        // LEDs have some resistance based on forward voltage drop
+        // Approximate resistance: V_forward / typical_current ≈ 2V / 0.02A = 100Ω
+        // But for simulation we'll use a lower value
+        totalResistance += 0.5;
       }
       // Wires and switches have negligible resistance
     }
@@ -513,6 +557,59 @@ class CircuitGraph {
         
         // Update bulb state
         bulb.originalComponent.is_on = isComplete && isInPath && !bulb.originalComponent.isBurnedOut;
+      }
+    }
+
+    // Update LEDs - check for burnout and update state
+    const leds = this.components.filter((c) => c.type === "led");
+    const burnedOutLEDs = [];
+    
+    for (const led of leds) {
+      const isInPath = componentsInPath.has(led.id);
+      if (led.originalComponent) {
+        // Check if LED is burned out
+        if (led.originalComponent.isBurnedOut) {
+          led.originalComponent.is_on = false;
+          led.originalComponent.isReverseBiased = false;
+          continue;
+        }
+        
+        // Check if LED is reverse biased (not in any completed path)
+        // If circuit is complete but LED is not in path, it might be reverse biased
+        led.originalComponent.isReverseBiased = !isInPath && isComplete;
+        
+        // Check for burnout if circuit is complete and LED is in path
+        if (isComplete && isInPath) {
+          const justBurnedOut = led.originalComponent.checkBurnout(measurements.current);
+          if (justBurnedOut) {
+            burnedOutLEDs.push(led.id);
+          }
+        }
+        
+        // Update LED state - only on if forward biased and in path
+        led.originalComponent.is_on = isComplete && isInPath && !led.originalComponent.isBurnedOut;
+      }
+    }
+
+    // Update Fuses - check if they blow
+    const fuses = this.components.filter((c) => c.type === "fuse");
+    const blownFuses = [];
+    
+    for (const fuse of fuses) {
+      const isInPath = componentsInPath.has(fuse.id);
+      if (fuse.originalComponent) {
+        // Check if fuse is blown
+        if (fuse.originalComponent.isBlown) {
+          continue;
+        }
+        
+        // Check if fuse should blow
+        if (isComplete && isInPath) {
+          const justBlew = fuse.originalComponent.checkBlow(measurements.current);
+          if (justBlew) {
+            blownFuses.push(fuse.id);
+          }
+        }
       }
     }
 

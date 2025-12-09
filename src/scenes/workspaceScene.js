@@ -2,11 +2,13 @@ import Phaser from "phaser";
 import LabScene from "./labScene";
 import { Battery } from "../components/battery";
 import { Bulb } from "../components/bulb";
-import { Wire } from "../components/wire";
+import { Wire, WIRE_COLORS } from "../components/wire";
 import { CircuitGraph } from "../logic/circuit_graph";
 import { Node } from "../logic/node";
 import { Switch } from "../components/switch";
 import { Resistor } from "../components/resistor";
+import { LED, LED_COLORS } from "../components/led";
+import { Fuse } from "../components/fuse";
 import { config } from "../config";
 
 export default class WorkspaceScene extends Phaser.Scene {
@@ -150,6 +152,8 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.load.image("žica", "src/components/wire.png");
     this.load.image("ammeter", "src/components/ammeter.png");
     this.load.image("voltmeter", "src/components/voltmeter.png");
+    this.load.image("led", "src/components/led.svg");
+    this.load.image("fuse", "src/components/fuse.png");
   }
 
   create() {
@@ -355,7 +359,7 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.leftPanelOverlay = this.add.rectangle(0, 0, panelWidth, height, 0x000000, 0.2).setOrigin(0).setScrollFactor(0).setDepth(801);
 
     this.add
-      .text(panelWidth / 2, 60, "Komponente", {
+      .text(panelWidth / 2, 55, "Komponente", {
         fontSize: "18px",
         color: "#ffffff",
         fontStyle: "bold",
@@ -364,14 +368,60 @@ export default class WorkspaceScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(802);
 
-    // komponente v stranski vrstici (these stay at fixed positions)
-    this.createComponent(panelWidth / 2, 100, "baterija", 0xffcc00, { isInPanel: true });
-    this.createComponent(panelWidth / 2, 180, "upor", 0xff6600, { isInPanel: true });
-    this.createComponent(panelWidth / 2, 260, "svetilka", 0xff0000, { isInPanel: true });
-    this.createComponent(panelWidth / 2, 340, "stikalo-off", 0x666666, { isInPanel: true });
-    this.createComponent(panelWidth / 2, 420, "žica", 0x0066cc, { isInPanel: true });
-    this.createComponent(panelWidth / 2, 500, "ammeter", 0x00cc66, { isInPanel: true });
-    this.createComponent(panelWidth / 2, 580, "voltmeter", 0x00cc66, { isInPanel: true });
+    // Scrollable panel setup
+    this.panelScrollY = 0;
+    this.panelMinScroll = 0;
+    const componentSpacing = 100;
+    const componentStartY = 95;
+    const numComponents = 9;
+    const totalContentHeight = componentStartY + (numComponents * componentSpacing);
+    this.panelMaxScroll = Math.max(0, totalContentHeight - height + 50);
+    
+    // Create a container for scrollable panel components
+    this.panelContainer = this.add.container(0, 0).setDepth(803).setScrollFactor(0);
+    
+    // komponente v stranski vrstici (inside scrollable container)
+    const panelComponents = [
+      { y: componentStartY, type: "baterija", color: 0xffcc00 },
+      { y: componentStartY + componentSpacing * 1, type: "upor", color: 0xff6600 },
+      { y: componentStartY + componentSpacing * 2, type: "svetilka", color: 0xff0000 },
+      { y: componentStartY + componentSpacing * 3, type: "stikalo-off", color: 0x666666 },
+      { y: componentStartY + componentSpacing * 4, type: "žica", color: 0x0066cc },
+      { y: componentStartY + componentSpacing * 5, type: "ammeter", color: 0x00cc66 },
+      { y: componentStartY + componentSpacing * 6, type: "voltmeter", color: 0x00cc66 },
+      { y: componentStartY + componentSpacing * 7, type: "led", color: 0xff3333 },
+      { y: componentStartY + componentSpacing * 8, type: "fuse", color: 0xcccccc },
+    ];
+    
+    this.panelComponentObjects = [];
+    for (const comp of panelComponents) {
+      const compObj = this.createComponent(panelWidth / 2, comp.y, comp.type, comp.color, { isInPanel: true });
+      this.panelComponentObjects.push(compObj);
+    }
+
+    // Add scroll indicators
+    this.scrollUpIndicator = this.add.text(panelWidth / 2, 80, "▲", {
+      fontSize: "16px",
+      color: "#ffffff",
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(810).setAlpha(0);
+    
+    this.scrollDownIndicator = this.add.text(panelWidth / 2, height - 15, "▼", {
+      fontSize: "16px",
+      color: "#ffffff",
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(810).setAlpha(0);
+
+    // Mouse wheel scroll handler for left panel
+    this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY, deltaZ) => {
+      // Only scroll if mouse is over the left panel
+      if (pointer.x < panelWidth) {
+        this.panelScrollY += deltaY * 0.5;
+        this.panelScrollY = Phaser.Math.Clamp(this.panelScrollY, this.panelMinScroll, this.panelMaxScroll);
+        this.updatePanelScroll();
+      }
+    });
+
+    // Update scroll indicators visibility
+    this.updatePanelScroll();
 
     this.backButton = this.add
       .text(12, 10, "↩ Nazaj", {
@@ -1275,6 +1325,8 @@ export default class WorkspaceScene extends Phaser.Scene {
       žica: "Povezuje komponente\nKlikni za obračanje",
       ammeter: "Meri električni tok\nEnota: amperi (A)",
       voltmeter: "Meri električno napetost\nEnota: volti (V)",
+      led: "Svetleča dioda (LED)\nSveti samo v eni smeri",
+      fuse: "Varovalka\nPregori ob prevelikem toku",
     };
     return details[type] || "Komponenta";
   }
@@ -1372,6 +1424,8 @@ export default class WorkspaceScene extends Phaser.Scene {
     this.updateCircuitStatusLabel(result.status);
     this.updateMissingComponentsLabel();
     this.updateBulbVisuals(result.status);
+    this.updateLEDVisuals(result.status);
+    this.updateFuseVisuals(result.status);
     this.updateMeasurementLabels();
     this.visualizeElectricity(result.paths);
   }
@@ -1609,8 +1663,8 @@ export default class WorkspaceScene extends Phaser.Scene {
           }
           burnedLabel = this.add.text(0, 45, "💥 PREGORELA", {
             fontSize: "11px",
-            color: "#ffffff",
-            backgroundColor: "#cc0000",
+            color: "#cc0000",
+            backgroundColor: "#ffffff",
             padding: { x: 4, y: 2 },
             fontStyle: "bold"
           }).setOrigin(0.5);
@@ -1741,6 +1795,189 @@ export default class WorkspaceScene extends Phaser.Scene {
           glowCircle.setVisible(false);
           this.tweens.killTweensOf(glowCircle);
         }
+      }
+    }
+  }
+
+  /**
+   * Update LED visuals based on circuit state
+   */
+  updateLEDVisuals(simulationResult) {
+    for (const component of this.placedComponents) {
+      const logicComp = component.getData("logicComponent");
+      if (!logicComp || logicComp.type !== "led") continue;
+      
+      const ledImage = component.getData("componentImage") || component.list[0];
+      if (!ledImage) continue;
+
+      // Check if LED is burned out
+      if (logicComp.isBurnedOut) {
+        ledImage.setTint(0x333333); // Dark gray tint
+        
+        // Remove glow
+        const glowCircle = component.getData("glowCircle");
+        if (glowCircle) {
+          glowCircle.setVisible(false);
+          this.tweens.killTweensOf(glowCircle);
+        }
+        
+        // Add burned out label
+        let burnedLabel = component.getData("burnedLabel");
+        if (!burnedLabel || !burnedLabel.active) {
+          if (burnedLabel) component.remove(burnedLabel, true);
+          burnedLabel = this.add.text(0, 45, "💥 PREGORELA", {
+            fontSize: "10px",
+            color: "#cc0000",
+            backgroundColor: "#ffffff",
+            padding: { x: 3, y: 1 },
+            fontStyle: "bold"
+          }).setOrigin(0.5);
+          component.add(burnedLabel);
+          component.setData("burnedLabel", burnedLabel);
+        }
+        burnedLabel.setVisible(true);
+        continue;
+      }
+
+      // Hide burned label if not burned
+      const burnedLabel = component.getData("burnedLabel");
+      if (burnedLabel) burnedLabel.setVisible(false);
+
+      // Check if LED is reverse biased
+      if (logicComp.isReverseBiased) {
+        ledImage.setTint(0x555555); // Darker gray for reverse biased
+        
+        // Hide glow
+        const glowCircle = component.getData("glowCircle");
+        if (glowCircle) {
+          glowCircle.setVisible(false);
+          this.tweens.killTweensOf(glowCircle);
+        }
+        
+        // Show reverse bias label
+        let reverseLabel = component.getData("reverseLabel");
+        if (!reverseLabel || !reverseLabel.active) {
+          if (reverseLabel) component.remove(reverseLabel, true);
+          reverseLabel = this.add.text(0, 45, "⚠️ OBRNJENA", {
+            fontSize: "10px",
+            color: "#ff9900",
+            backgroundColor: "#ffffff",
+            padding: { x: 3, y: 1 },
+            fontStyle: "bold"
+          }).setOrigin(0.5);
+          component.add(reverseLabel);
+          component.setData("reverseLabel", reverseLabel);
+        }
+        reverseLabel.setVisible(true);
+        continue;
+      }
+      
+      // Hide reverse label if not reverse biased
+      const reverseLabel = component.getData("reverseLabel");
+      if (reverseLabel) reverseLabel.setVisible(false);
+
+      const isOn = logicComp.is_on && simulationResult === 1;
+      
+      if (isOn) {
+        // Apply LED color tint
+        const ledColorHex = logicComp.getColorHex();
+        ledImage.setTint(ledColorHex);
+        
+        // Add glow effect
+        if (!component.getData("glowCircle")) {
+          const glowCircle = this.add.circle(0, 0, 30, ledColorHex, 0.6);
+          glowCircle.setBlendMode(Phaser.BlendModes.ADD);
+          component.add(glowCircle);
+          component.sendToBack(glowCircle);
+          component.setData("glowCircle", glowCircle);
+        }
+        const glowCircle = component.getData("glowCircle");
+        if (glowCircle) {
+          glowCircle.setFillStyle(logicComp.getGlowHex(), 0.6);
+          glowCircle.setVisible(true);
+          
+          this.tweens.killTweensOf(glowCircle);
+          this.tweens.add({
+            targets: glowCircle,
+            alpha: { from: 0.4, to: 0.7 },
+            scale: { from: 0.8, to: 1.0 },
+            duration: 800,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+          });
+        }
+      } else {
+        // LED off - show base color slightly
+        ledImage.setTint(0x666666);
+        
+        const glowCircle = component.getData("glowCircle");
+        if (glowCircle) {
+          glowCircle.setVisible(false);
+          this.tweens.killTweensOf(glowCircle);
+        }
+      }
+    }
+  }
+
+  /**
+   * Update Fuse visuals based on circuit state
+   */
+  updateFuseVisuals(simulationResult) {
+    for (const component of this.placedComponents) {
+      const logicComp = component.getData("logicComponent");
+      if (!logicComp || logicComp.type !== "fuse") continue;
+      
+      const fuseImage = component.getData("componentImage") || component.list[0];
+      if (!fuseImage) continue;
+
+      // Check if fuse is blown
+      if (logicComp.isBlown) {
+        fuseImage.setTint(0x444444); // Dark tint for blown fuse
+        
+        // Add blown label
+        let blownLabel = component.getData("blownLabel");
+        if (!blownLabel || !blownLabel.active) {
+          if (blownLabel) component.remove(blownLabel, true);
+          blownLabel = this.add.text(0, 45, "⚡ PREGORELA", {
+            fontSize: "10px",
+            color: "#ff6600",
+            backgroundColor: "#ffffff",
+            padding: { x: 3, y: 1 },
+            fontStyle: "bold"
+          }).setOrigin(0.5);
+          component.add(blownLabel);
+          component.setData("blownLabel", blownLabel);
+        }
+        blownLabel.setVisible(true);
+        
+        // Show current rating
+        let ratingLabel = component.getData("ratingLabel");
+        if (ratingLabel) ratingLabel.setVisible(false);
+      } else {
+        // Hide blown label
+        const blownLabel = component.getData("blownLabel");
+        if (blownLabel) blownLabel.setVisible(false);
+        
+        // Show rating label
+        let ratingLabel = component.getData("ratingLabel");
+        if (!ratingLabel || !ratingLabel.active) {
+          if (ratingLabel) component.remove(ratingLabel, true);
+          ratingLabel = this.add.text(0, -45, "", {
+            fontSize: "11px",
+            color: "#ffffff",
+            backgroundColor: "#666666aa",
+            padding: { x: 4, y: 2 },
+            fontStyle: "bold"
+          }).setOrigin(0.5);
+          component.add(ratingLabel);
+          component.setData("ratingLabel", ratingLabel);
+        }
+        ratingLabel.setText(`${logicComp.maxCurrent.toFixed(1)} A`);
+        ratingLabel.setVisible(true);
+        
+        // Normal fuse appearance
+        fuseImage.clearTint();
       }
     }
   }
@@ -2105,8 +2342,10 @@ export default class WorkspaceScene extends Phaser.Scene {
           .image(0, 0, "žica")
           .setOrigin(0.5)
           .setDisplaySize(100, 100);
+        // Don't apply tint by default - keep original wire image
         component.add(componentImage);
         component.setData("logicComponent", comp);
+        component.setData("componentImage", componentImage);
         break;
      case "ammeter":
   id = "ammeter_" + this.getRandomInt(1000, 9999);
@@ -2143,25 +2382,75 @@ case "voltmeter":
   component.add(componentImage);
   component.setData("logicComponent", comp);
   break;
+
+case "led":
+  id = "led_" + this.getRandomInt(1000, 9999);
+  comp = new LED(
+    id,
+    new Node(id + "_start", -40, 0),
+    new Node(id + "_end", 40, 0)
+  );
+  comp.type = "led";
+  comp.localStart = { x: -40, y: 0 };
+  comp.localEnd = { x: 40, y: 0 };
+  componentImage = this.add
+    .image(0, 0, "led")
+    .setOrigin(0.5)
+    .setDisplaySize(100, 100);
+  component.add(componentImage);
+  component.setData("logicComponent", comp);
+  component.setData("componentImage", componentImage);
+  break;
+
+case "fuse":
+  id = "fuse_" + this.getRandomInt(1000, 9999);
+  comp = new Fuse(
+    id,
+    new Node(id + "_start", -40, 0),
+    new Node(id + "_end", 40, 0)
+  );
+  comp.type = "fuse";
+  comp.localStart = { x: -40, y: 0 };
+  comp.localEnd = { x: 40, y: 0 };
+  componentImage = this.add
+    .image(0, 0, "fuse")
+    .setOrigin(0.5)
+    .setDisplaySize(100, 100);
+  component.add(componentImage);
+  component.setData("logicComponent", comp);
+  component.setData("componentImage", componentImage);
+  break;
     }
 
-    component.on("pointerover", () => {
+    component.on("pointerover", (pointer) => {
       if (component.getData("isInPanel")) {
         // prikaži info okno
         const details = this.getComponentDetails(type);
         this.infoText.setText(details);
 
-        // zraven komponente
-        this.infoWindow.x = x + 120;
-        this.infoWindow.y = y;
+        // Position to the right of the panel (panelWidth + offset)
+        this.infoWindow.x = this.panelWidth + 110;
+        this.infoWindow.y = pointer.y;
         this.infoWindow.setVisible(true);
+        
+        // Store which component is being hovered
+        this.hoveredPanelComponent = component;
       }
       component.setScale(1.1);
+    });
+
+    component.on("pointermove", (pointer) => {
+      if (component.getData("isInPanel") && this.infoWindow.visible) {
+        // Follow mouse Y position, but keep X fixed to the right of panel
+        this.infoWindow.x = this.panelWidth + 110;
+        this.infoWindow.y = pointer.y;
+      }
     });
 
     component.on("pointerout", () => {
       if (component.getData("isInPanel")) {
         this.infoWindow.setVisible(false);
+        this.hoveredPanelComponent = null;
       }
       component.setScale(1);
     });
@@ -2177,7 +2466,9 @@ case "voltmeter":
         "stikalo-on": "stikalo",
         "žica": "žica",
         "ammeter": "ammeter",
-        "voltmeter": "voltmeter"
+        "voltmeter": "voltmeter",
+        "led": "LED",
+        "fuse": "varovalka"
       };
       const labelText = labelNames[type] || type;
       const label = this.add
@@ -2387,6 +2678,27 @@ case "voltmeter":
         if (logicComp && logicComp.type === "bulb" && !this.dialogCooldown) {
           this.dialogCooldown = true;
           this.showBulbDialog(logicComp, component);
+          this.time.delayedCall(500, () => { this.dialogCooldown = false; });
+        }
+
+        // Handle wire color selection on click (with cooldown)
+        if (logicComp && logicComp.type === "wire" && !this.dialogCooldown) {
+          this.dialogCooldown = true;
+          this.showWireColorDialog(logicComp, component);
+          this.time.delayedCall(500, () => { this.dialogCooldown = false; });
+        }
+
+        // Handle LED color selection or replacement on click (with cooldown)
+        if (logicComp && logicComp.type === "led" && !this.dialogCooldown) {
+          this.dialogCooldown = true;
+          this.showLEDDialog(logicComp, component);
+          this.time.delayedCall(500, () => { this.dialogCooldown = false; });
+        }
+
+        // Handle Fuse rating adjustment or replacement on click (with cooldown)
+        if (logicComp && logicComp.type === "fuse" && !this.dialogCooldown) {
+          this.dialogCooldown = true;
+          this.showFuseDialog(logicComp, component);
           this.time.delayedCall(500, () => { this.dialogCooldown = false; });
         }
       }
@@ -2949,11 +3261,12 @@ case "voltmeter":
   showSaveDialog() {
     const { width, height } = this.cameras.main;
 
-    // Overlay
+    // Overlay - interactive to block clicks on components underneath
     const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7)
       .setOrigin(0.5)
       .setDepth(2000)
-      .setScrollFactor(0);
+      .setScrollFactor(0)
+      .setInteractive();
 
     // Dialog
     const dialogWidth = 400;
@@ -3054,7 +3367,8 @@ case "voltmeter":
     const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7)
       .setOrigin(0.5)
       .setDepth(2000)
-      .setScrollFactor(0);
+      .setScrollFactor(0)
+      .setInteractive();
 
     // Dialog
     const dialogWidth = 450;
@@ -3145,7 +3459,8 @@ case "voltmeter":
     const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7)
       .setOrigin(0.5)
       .setDepth(2000)
-      .setScrollFactor(0);
+      .setScrollFactor(0)
+      .setInteractive();
 
     // Dialog background
     const dialogWidth = 400;
@@ -3299,7 +3614,8 @@ case "voltmeter":
     const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7)
       .setOrigin(0.5)
       .setDepth(2000)
-      .setScrollFactor(0);
+      .setScrollFactor(0)
+      .setInteractive();
 
     // Dialog background
     const dialogWidth = 400;
@@ -3457,7 +3773,8 @@ case "voltmeter":
     const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7)
       .setOrigin(0.5)
       .setDepth(2000)
-      .setScrollFactor(0);
+      .setScrollFactor(0)
+      .setInteractive();
 
     // Dialog background
     const dialogWidth = 400;
@@ -3650,6 +3967,710 @@ case "voltmeter":
     inputField.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         if (isBurnedOut) {
+          replaceBtn.emit('pointerdown');
+        } else {
+          confirmBtn.emit('pointerdown');
+        }
+      } else if (e.key === 'Escape') {
+        cancelBtn.emit('pointerdown');
+      }
+    });
+  }
+
+  /**
+   * Show dialog to select wire color
+   */
+  showWireColorDialog(logicComp, component) {
+    const currentColor = logicComp.wireColor || 'black';
+    const { width, height } = this.cameras.main;
+    const colors = WIRE_COLORS;
+
+    // Semi-transparent background overlay
+    const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7)
+      .setOrigin(0.5)
+      .setDepth(2000)
+      .setScrollFactor(0)
+      .setInteractive();
+
+    // Dialog background
+    const dialogWidth = 350;
+    const dialogHeight = 280;
+    const dialogBg = this.add.graphics();
+    dialogBg.setDepth(2001);
+    dialogBg.setScrollFactor(0);
+    dialogBg.fillStyle(0xffffff, 1);
+    dialogBg.fillRoundedRect(width / 2 - dialogWidth / 2, height / 2 - dialogHeight / 2, dialogWidth, dialogHeight, 15);
+    dialogBg.lineStyle(3, 0x0066cc, 1);
+    dialogBg.strokeRoundedRect(width / 2 - dialogWidth / 2, height / 2 - dialogHeight / 2, dialogWidth, dialogHeight, 15);
+
+    // Title
+    const titleText = this.add.text(width / 2, height / 2 - 110, 'Izberi barvo žice', {
+      fontSize: '22px',
+      color: '#222',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    // Color grid
+    const colorKeys = Object.keys(colors);
+    const colorsPerRow = 4;
+    const colorBoxSize = 50;
+    const colorGap = 15;
+    const startX = width / 2 - ((colorsPerRow * (colorBoxSize + colorGap)) - colorGap) / 2;
+    const startY = height / 2 - 50;
+
+    const allElements = []; // Track all elements for cleanup
+
+    // Helper to clean up dialog
+    const closeDialog = () => {
+      overlay.destroy();
+      dialogBg.destroy();
+      titleText.destroy();
+      allElements.forEach(el => {
+        if (el && el.destroy) el.destroy();
+      });
+      cancelBg.destroy();
+      cancelBtn.destroy();
+    };
+
+    colorKeys.forEach((colorKey, index) => {
+      const col = index % colorsPerRow;
+      const row = Math.floor(index / colorsPerRow);
+      const x = startX + col * (colorBoxSize + colorGap) + colorBoxSize / 2;
+      const y = startY + row * (colorBoxSize + colorGap + 20);
+
+      // Color box background
+      const colorBg = this.add.graphics();
+      colorBg.setDepth(2001).setScrollFactor(0);
+      
+      // Handle 'none' option specially - show a gradient/pattern
+      const boxColor = colors[colorKey].hex !== null ? colors[colorKey].hex : 0x888888;
+      colorBg.fillStyle(boxColor, 1);
+      colorBg.fillRoundedRect(x - colorBoxSize / 2, y - colorBoxSize / 2, colorBoxSize, colorBoxSize, 8);
+      
+      // For 'none' option, add a diagonal line pattern to indicate "original"
+      if (colors[colorKey].hex === null) {
+        colorBg.lineStyle(2, 0x444444, 1);
+        colorBg.lineBetween(x - colorBoxSize / 2 + 5, y + colorBoxSize / 2 - 5, x + colorBoxSize / 2 - 5, y - colorBoxSize / 2 + 5);
+      }
+      
+      // Add border for current selection
+      if (colorKey === currentColor) {
+        colorBg.lineStyle(3, 0x000000, 1);
+        colorBg.strokeRoundedRect(x - colorBoxSize / 2, y - colorBoxSize / 2, colorBoxSize, colorBoxSize, 8);
+      }
+      allElements.push(colorBg);
+
+      // Color name label
+      const colorLabel = this.add.text(x, y + colorBoxSize / 2 + 10, colors[colorKey].name, {
+        fontSize: '11px',
+        color: '#333'
+      }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+      allElements.push(colorLabel);
+
+      // Interactive zone
+      const hitArea = this.add.rectangle(x, y, colorBoxSize, colorBoxSize, 0x000000, 0)
+        .setOrigin(0.5)
+        .setDepth(2003)
+        .setScrollFactor(0)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerover', () => {
+          colorBg.clear();
+          colorBg.fillStyle(boxColor, 1);
+          colorBg.fillRoundedRect(x - colorBoxSize / 2, y - colorBoxSize / 2, colorBoxSize, colorBoxSize, 8);
+          if (colors[colorKey].hex === null) {
+            colorBg.lineStyle(2, 0x444444, 1);
+            colorBg.lineBetween(x - colorBoxSize / 2 + 5, y + colorBoxSize / 2 - 5, x + colorBoxSize / 2 - 5, y - colorBoxSize / 2 + 5);
+          }
+          colorBg.lineStyle(2, 0x000000, 0.5);
+          colorBg.strokeRoundedRect(x - colorBoxSize / 2, y - colorBoxSize / 2, colorBoxSize, colorBoxSize, 8);
+        })
+        .on('pointerout', () => {
+          colorBg.clear();
+          colorBg.fillStyle(boxColor, 1);
+          colorBg.fillRoundedRect(x - colorBoxSize / 2, y - colorBoxSize / 2, colorBoxSize, colorBoxSize, 8);
+          if (colors[colorKey].hex === null) {
+            colorBg.lineStyle(2, 0x444444, 1);
+            colorBg.lineBetween(x - colorBoxSize / 2 + 5, y + colorBoxSize / 2 - 5, x + colorBoxSize / 2 - 5, y - colorBoxSize / 2 + 5);
+          }
+          if (colorKey === currentColor) {
+            colorBg.lineStyle(3, 0x000000, 1);
+            colorBg.strokeRoundedRect(x - colorBoxSize / 2, y - colorBoxSize / 2, colorBoxSize, colorBoxSize, 8);
+          }
+        })
+        .on('pointerdown', () => {
+          // Set the wire color
+          logicComp.wireColor = colorKey;
+          
+          // Apply tint to wire image - try multiple ways to find it
+          let wireImage = component.getData("componentImage");
+          if (!wireImage) {
+            // Try to find Image in container's children
+            for (const child of component.list) {
+              if (child.type === 'Image') {
+                wireImage = child;
+                break;
+              }
+            }
+          }
+          if (!wireImage) {
+            wireImage = component.list[0];
+          }
+          
+          console.log(`Wire color change - colorKey: ${colorKey}, wireImage:`, wireImage);
+          console.log(`Component list:`, component.list);
+          
+          if (wireImage) {
+            if (colorKey === 'none' || colors[colorKey].hex === null) {
+              wireImage.clearTint();
+              console.log(`Wire ${logicComp.id} tint cleared`);
+            } else {
+              // Use setTintFill for solid color overlay
+              wireImage.setTintFill(colors[colorKey].hex);
+              console.log(`Wire ${logicComp.id} tintFill applied: 0x${colors[colorKey].hex.toString(16)}`);
+            }
+          } else {
+            console.warn(`Could not find wire image to apply tint`);
+          }
+          
+          // Set a longer cooldown to prevent dialog from reopening
+          this.dialogCooldown = true;
+          this.time.delayedCall(800, () => { this.dialogCooldown = false; });
+          
+          closeDialog();
+        });
+      allElements.push(hitArea);
+    });
+
+    // Cancel button
+    const buttonWidth = 120;
+    const buttonHeight = 40;
+    const buttonY = height / 2 + 105;
+
+    const cancelBg = this.add.graphics();
+    cancelBg.setDepth(2001).setScrollFactor(0);
+    cancelBg.fillStyle(0xcccccc, 1);
+    cancelBg.fillRoundedRect(width / 2 - buttonWidth / 2, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+
+    const cancelBtn = this.add.text(width / 2, buttonY, 'Zapri', {
+      fontSize: '16px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerover', () => {
+        cancelBg.clear();
+        cancelBg.fillStyle(0xaaaaaa, 1);
+        cancelBg.fillRoundedRect(width / 2 - buttonWidth / 2, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerout', () => {
+        cancelBg.clear();
+        cancelBg.fillStyle(0xcccccc, 1);
+        cancelBg.fillRoundedRect(width / 2 - buttonWidth / 2, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerdown', () => {
+        // Set cooldown to prevent dialog from reopening
+        this.dialogCooldown = true;
+        this.time.delayedCall(800, () => { this.dialogCooldown = false; });
+        closeDialog();
+      });
+  }
+
+  /**
+   * Show dialog to select LED color or replace burned LED
+   */
+  showLEDDialog(logicComp, component) {
+    const currentColor = logicComp.ledColor || 'red';
+    const currentMaxCurrent = logicComp.maxCurrent || 5;
+    const isBurnedOut = logicComp.isBurnedOut || false;
+    const { width, height } = this.cameras.main;
+    const colors = LED_COLORS;
+
+    // Semi-transparent background overlay
+    const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7)
+      .setOrigin(0.5)
+      .setDepth(2000)
+      .setScrollFactor(0)
+      .setInteractive();
+
+    // Dialog background - larger to accommodate input field
+    const dialogWidth = 400;
+    const dialogHeight = isBurnedOut ? 420 : 380;
+    const dialogBg = this.add.graphics();
+    dialogBg.setDepth(2001);
+    dialogBg.setScrollFactor(0);
+    dialogBg.fillStyle(0xffffff, 1);
+    dialogBg.fillRoundedRect(width / 2 - dialogWidth / 2, height / 2 - dialogHeight / 2, dialogWidth, dialogHeight, 15);
+    dialogBg.lineStyle(3, isBurnedOut ? 0xcc0000 : colors[currentColor].hex, 1);
+    dialogBg.strokeRoundedRect(width / 2 - dialogWidth / 2, height / 2 - dialogHeight / 2, dialogWidth, dialogHeight, 15);
+
+    // Title
+    const titleText = this.add.text(width / 2, height / 2 - (isBurnedOut ? 175 : 155), 
+      isBurnedOut ? '💥 LED je pregorela!' : 'Nastavi LED', {
+      fontSize: '22px',
+      color: isBurnedOut ? '#cc0000' : '#222',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    // Current info
+    const currentText = this.add.text(width / 2, height / 2 - (isBurnedOut ? 140 : 120), 
+      `Trenutna barva: ${colors[currentColor].name} | Max tok: ${currentMaxCurrent * 1000} mA`, {
+      fontSize: '14px',
+      color: '#666'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    // Burned out explanation
+    let burnedText = null;
+    if (isBurnedOut) {
+      burnedText = this.add.text(width / 2, height / 2 - 105, 
+        'LED je pregorela zaradi prevelikega toka.\nIzberi novo barvo za zamenjavo.', {
+        fontSize: '14px',
+        color: '#666',
+        align: 'center'
+      }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+    }
+
+    const allElements = [];
+
+    // Max current input section
+    const maxCurrentLabel = this.add.text(width / 2 - 140, height / 2 + (isBurnedOut ? 70 : 50), 'Max tok (mA):', {
+      fontSize: '14px',
+      color: '#333'
+    }).setOrigin(0, 0.5).setDepth(2002).setScrollFactor(0);
+    allElements.push(maxCurrentLabel);
+
+    // HTML Input field for max current
+    const inputField = document.createElement('input');
+    inputField.type = 'number';
+    inputField.value = (currentMaxCurrent * 1000).toFixed(0); // Show in mA
+    inputField.min = '10';
+    inputField.max = '50000';
+    inputField.step = '10';
+    inputField.style.position = 'absolute';
+    inputField.style.left = `${width / 2 - 20}px`;
+    inputField.style.top = `${height / 2 + (isBurnedOut ? 55 : 35)}px`;
+    inputField.style.width = '120px';
+    inputField.style.height = '30px';
+    inputField.style.fontSize = '14px';
+    inputField.style.textAlign = 'center';
+    inputField.style.borderRadius = '6px';
+    inputField.style.border = '2px solid #888';
+    inputField.style.outline = 'none';
+    inputField.style.padding = '3px';
+    inputField.style.zIndex = '3000';
+    document.body.appendChild(inputField);
+
+    // Error message
+    const errorText = this.add.text(width / 2, height / 2 + (isBurnedOut ? 100 : 80), '', {
+      fontSize: '12px',
+      color: '#cc0000'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+    allElements.push(errorText);
+
+    // Helper to clean up dialog
+    const closeDialog = () => {
+      inputField.remove();
+      overlay.destroy();
+      dialogBg.destroy();
+      titleText.destroy();
+      currentText.destroy();
+      cancelBg.destroy();
+      cancelBtn.destroy();
+      confirmBg.destroy();
+      confirmBtn.destroy();
+      if (burnedText) burnedText.destroy();
+      allElements.forEach(el => { if (el && el.destroy) el.destroy(); });
+    };
+
+    // Color grid
+    const colorKeys = Object.keys(colors);
+    const colorsPerRow = 5;
+    const colorBoxSize = 55;
+    const colorGap = 12;
+    const startX = width / 2 - ((colorsPerRow * (colorBoxSize + colorGap)) - colorGap) / 2;
+    const startY = height / 2 - (isBurnedOut ? 55 : 75);
+
+    colorKeys.forEach((colorKey, index) => {
+      const col = index % colorsPerRow;
+      const row = Math.floor(index / colorsPerRow);
+      const x = startX + col * (colorBoxSize + colorGap) + colorBoxSize / 2;
+      const y = startY + row * (colorBoxSize + colorGap + 22);
+
+      // Color box background with LED color
+      const colorBg = this.add.graphics();
+      colorBg.setDepth(2001).setScrollFactor(0);
+      colorBg.fillStyle(colors[colorKey].hex, 1);
+      colorBg.fillRoundedRect(x - colorBoxSize / 2, y - colorBoxSize / 2, colorBoxSize, colorBoxSize, 8);
+      
+      // Add border for current selection
+      if (colorKey === currentColor) {
+        colorBg.lineStyle(3, 0x000000, 1);
+        colorBg.strokeRoundedRect(x - colorBoxSize / 2, y - colorBoxSize / 2, colorBoxSize, colorBoxSize, 8);
+      }
+      allElements.push(colorBg);
+
+      // Color name label
+      const colorLabel = this.add.text(x, y + colorBoxSize / 2 + 10, colors[colorKey].name, {
+        fontSize: '11px',
+        color: '#333'
+      }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+      allElements.push(colorLabel);
+
+      // Interactive zone
+      const hitArea = this.add.rectangle(x, y, colorBoxSize, colorBoxSize, 0x000000, 0)
+        .setOrigin(0.5)
+        .setDepth(2003)
+        .setScrollFactor(0)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerover', () => {
+          colorBg.clear();
+          colorBg.fillStyle(colors[colorKey].hex, 1);
+          colorBg.fillRoundedRect(x - colorBoxSize / 2, y - colorBoxSize / 2, colorBoxSize, colorBoxSize, 8);
+          colorBg.lineStyle(2, 0x000000, 0.5);
+          colorBg.strokeRoundedRect(x - colorBoxSize / 2, y - colorBoxSize / 2, colorBoxSize, colorBoxSize, 8);
+        })
+        .on('pointerout', () => {
+          colorBg.clear();
+          colorBg.fillStyle(colors[colorKey].hex, 1);
+          colorBg.fillRoundedRect(x - colorBoxSize / 2, y - colorBoxSize / 2, colorBoxSize, colorBoxSize, 8);
+          if (colorKey === currentColor) {
+            colorBg.lineStyle(3, 0x000000, 1);
+            colorBg.strokeRoundedRect(x - colorBoxSize / 2, y - colorBoxSize / 2, colorBoxSize, colorBoxSize, 8);
+          }
+        })
+        .on('pointerdown', () => {
+          // Validate max current input
+          const maxCurrentMa = parseFloat(inputField.value);
+          if (isNaN(maxCurrentMa) || maxCurrentMa < 10 || maxCurrentMa > 50000) {
+            errorText.setText('Vnesi veljaven tok med 10 in 50000 mA');
+            return;
+          }
+          
+          // Set the LED color and max current, replace if burned out
+          if (isBurnedOut) {
+            logicComp.replace();
+          }
+          logicComp.setColor(colorKey);
+          logicComp.maxCurrent = maxCurrentMa / 1000; // Convert mA to A
+          console.log(`LED ${logicComp.id} color set to ${colorKey}, max current: ${maxCurrentMa}mA${isBurnedOut ? ' (replaced)' : ''}`);
+          
+          // Set cooldown to prevent dialog from reopening
+          this.dialogCooldown = true;
+          this.time.delayedCall(800, () => { this.dialogCooldown = false; });
+          
+          closeDialog();
+          this.rebuildGraph();
+        });
+      allElements.push(hitArea);
+    });
+
+    // Buttons
+    const buttonWidth = 100;
+    const buttonHeight = 40;
+    const buttonY = height / 2 + (isBurnedOut ? 160 : 140);
+
+    // Cancel button
+    const cancelBg = this.add.graphics();
+    cancelBg.setDepth(2001).setScrollFactor(0);
+    cancelBg.fillStyle(0xcccccc, 1);
+    cancelBg.fillRoundedRect(width / 2 - buttonWidth - 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+
+    const cancelBtn = this.add.text(width / 2 - buttonWidth / 2 - 10, buttonY, 'Prekliči', {
+      fontSize: '16px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerover', () => {
+        cancelBg.clear();
+        cancelBg.fillStyle(0xaaaaaa, 1);
+        cancelBg.fillRoundedRect(width / 2 - buttonWidth - 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerout', () => {
+        cancelBg.clear();
+        cancelBg.fillStyle(0xcccccc, 1);
+        cancelBg.fillRoundedRect(width / 2 - buttonWidth - 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerdown', () => {
+        // Set cooldown to prevent dialog from reopening
+        this.dialogCooldown = true;
+        this.time.delayedCall(800, () => { this.dialogCooldown = false; });
+        closeDialog();
+      });
+
+    // Confirm button (saves max current without changing color)
+    const confirmBg = this.add.graphics();
+    confirmBg.setDepth(2001).setScrollFactor(0);
+    confirmBg.fillStyle(0x44aa44, 1);
+    confirmBg.fillRoundedRect(width / 2 + 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+
+    const confirmBtn = this.add.text(width / 2 + buttonWidth / 2 + 10, buttonY, 'Potrdi', {
+      fontSize: '16px',
+      color: '#ffffff',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerover', () => {
+        confirmBg.clear();
+        confirmBg.fillStyle(0x338833, 1);
+        confirmBg.fillRoundedRect(width / 2 + 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerout', () => {
+        confirmBg.clear();
+        confirmBg.fillStyle(0x44aa44, 1);
+        confirmBg.fillRoundedRect(width / 2 + 10, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerdown', () => {
+        // Validate max current input
+        const maxCurrentMa = parseFloat(inputField.value);
+        if (isNaN(maxCurrentMa) || maxCurrentMa < 10 || maxCurrentMa > 50000) {
+          errorText.setText('Vnesi veljaven tok med 10 in 50000 mA');
+          return;
+        }
+        
+        // Update max current only (keep current color)
+        if (isBurnedOut) {
+          logicComp.replace();
+        }
+        logicComp.maxCurrent = maxCurrentMa / 1000; // Convert mA to A
+        console.log(`LED ${logicComp.id} max current set to ${maxCurrentMa}mA${isBurnedOut ? ' (replaced)' : ''}`);
+        
+        // Set cooldown to prevent dialog from reopening
+        this.dialogCooldown = true;
+        this.time.delayedCall(800, () => { this.dialogCooldown = false; });
+        
+        closeDialog();
+        this.rebuildGraph();
+      });
+
+    // Allow Enter key to confirm
+    inputField.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        confirmBtn.emit('pointerdown');
+      } else if (e.key === 'Escape') {
+        cancelBtn.emit('pointerdown');
+      }
+    });
+  }
+
+  /**
+   * Show dialog to adjust fuse rating or replace blown fuse
+   */
+  showFuseDialog(logicComp, component) {
+    const currentRating = logicComp.maxCurrent || 1;
+    const isBlown = logicComp.isBlown || false;
+    const { width, height } = this.cameras.main;
+
+    // Semi-transparent background overlay
+    const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7)
+      .setOrigin(0.5)
+      .setDepth(2000)
+      .setScrollFactor(0)
+      .setInteractive();
+
+    // Dialog background
+    const dialogWidth = 400;
+    const dialogHeight = isBlown ? 300 : 250;
+    const dialogBg = this.add.graphics();
+    dialogBg.setDepth(2001);
+    dialogBg.setScrollFactor(0);
+    dialogBg.fillStyle(0xffffff, 1);
+    dialogBg.fillRoundedRect(width / 2 - dialogWidth / 2, height / 2 - dialogHeight / 2, dialogWidth, dialogHeight, 15);
+    dialogBg.lineStyle(3, isBlown ? 0xcc0000 : 0x888888, 1);
+    dialogBg.strokeRoundedRect(width / 2 - dialogWidth / 2, height / 2 - dialogHeight / 2, dialogWidth, dialogHeight, 15);
+
+    // Title
+    const titleText = this.add.text(width / 2, height / 2 - (isBlown ? 110 : 80), 
+      isBlown ? '💥 Varovalka je pregorela!' : 'Nastavi vrednost varovalke', {
+      fontSize: '22px',
+      color: isBlown ? '#cc0000' : '#222',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    // Current rating display
+    const currentText = this.add.text(width / 2, height / 2 - (isBlown ? 70 : 40), 
+      `Maksimalni tok: ${currentRating.toFixed(2)} A (${(currentRating * 1000).toFixed(0)} mA)`, {
+      fontSize: '16px',
+      color: '#666'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    // Blown explanation
+    let blownText = null;
+    if (isBlown) {
+      blownText = this.add.text(width / 2, height / 2 - 35, 
+        'Varovalka je pregorela zaradi prevelikega toka.\nKlikni "Zamenjaj" za novo varovalko.', {
+        fontSize: '14px',
+        color: '#666',
+        align: 'center'
+      }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+    }
+
+    // HTML Input field (for rating in mA for easier input)
+    const inputField = document.createElement('input');
+    inputField.type = 'number';
+    inputField.value = (currentRating * 1000).toFixed(0); // Show in mA
+    inputField.min = '10';
+    inputField.max = '10000';
+    inputField.step = '10';
+    inputField.style.position = 'absolute';
+    inputField.style.left = `${width / 2 - 100}px`;
+    inputField.style.top = `${height / 2 + (isBlown ? 15 : -5)}px`;
+    inputField.style.width = '200px';
+    inputField.style.height = '40px';
+    inputField.style.fontSize = '18px';
+    inputField.style.textAlign = 'center';
+    inputField.style.borderRadius = '8px';
+    inputField.style.border = `2px solid ${isBlown ? '#cc0000' : '#888888'}`;
+    inputField.style.outline = 'none';
+    inputField.style.padding = '5px';
+    inputField.style.zIndex = '3000';
+    document.body.appendChild(inputField);
+    inputField.focus();
+
+    // Unit label
+    const unitLabel = this.add.text(width / 2 + 130, height / 2 + (isBlown ? 35 : 15), 'mA', {
+      fontSize: '18px',
+      color: '#666'
+    }).setOrigin(0, 0.5).setDepth(2002).setScrollFactor(0);
+
+    // Error message
+    const errorText = this.add.text(width / 2, height / 2 + (isBlown ? 70 : 50), '', {
+      fontSize: '14px',
+      color: '#cc0000'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    // Buttons
+    const buttonWidth = isBlown ? 100 : 120;
+    const buttonHeight = 40;
+    const buttonY = height / 2 + (isBlown ? 115 : 90);
+
+    // Helper to clean up dialog
+    const closeDialog = () => {
+      inputField.remove();
+      overlay.destroy();
+      dialogBg.destroy();
+      titleText.destroy();
+      currentText.destroy();
+      unitLabel.destroy();
+      errorText.destroy();
+      cancelBg.destroy();
+      cancelBtn.destroy();
+      confirmBg.destroy();
+      confirmBtn.destroy();
+      if (blownText) blownText.destroy();
+      if (replaceBg) replaceBg.destroy();
+      if (replaceBtn) replaceBtn.destroy();
+    };
+
+    // Cancel button
+    const cancelBg = this.add.graphics();
+    cancelBg.setDepth(2001).setScrollFactor(0);
+    cancelBg.fillStyle(0xcccccc, 1);
+    const cancelX = isBlown ? width / 2 - buttonWidth * 1.5 - 15 : width / 2 - buttonWidth - 10;
+    cancelBg.fillRoundedRect(cancelX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+
+    const cancelBtn = this.add.text(cancelX + buttonWidth / 2, buttonY, 'Prekliči', {
+      fontSize: '16px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerover', () => {
+        cancelBg.clear();
+        cancelBg.fillStyle(0xaaaaaa, 1);
+        cancelBg.fillRoundedRect(cancelX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerout', () => {
+        cancelBg.clear();
+        cancelBg.fillStyle(0xcccccc, 1);
+        cancelBg.fillRoundedRect(cancelX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerdown', () => {
+        this.dialogCooldown = true;
+        this.time.delayedCall(800, () => { this.dialogCooldown = false; });
+        closeDialog();
+      });
+
+    // Replace button (only if blown)
+    let replaceBg = null;
+    let replaceBtn = null;
+    if (isBlown) {
+      replaceBg = this.add.graphics();
+      replaceBg.setDepth(2001).setScrollFactor(0);
+      replaceBg.fillStyle(0x00aa00, 1);
+      const replaceX = width / 2 - buttonWidth / 2;
+      replaceBg.fillRoundedRect(replaceX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+
+      replaceBtn = this.add.text(replaceX + buttonWidth / 2, buttonY, 'Zamenjaj', {
+        fontSize: '16px',
+        color: '#ffffff',
+        fontStyle: 'bold'
+      }).setOrigin(0.5).setDepth(2002).setScrollFactor(0)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerover', () => {
+          replaceBg.clear();
+          replaceBg.fillStyle(0x008800, 1);
+          replaceBg.fillRoundedRect(replaceX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+        })
+        .on('pointerout', () => {
+          replaceBg.clear();
+          replaceBg.fillStyle(0x00aa00, 1);
+          replaceBg.fillRoundedRect(replaceX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+        })
+        .on('pointerdown', () => {
+          const ratingMa = parseFloat(inputField.value);
+          if (!isNaN(ratingMa) && ratingMa >= 10 && ratingMa <= 10000) {
+            // Replace the fuse (fix it and set new rating)
+            logicComp.replace();
+            logicComp.maxCurrent = ratingMa / 1000; // Convert mA to A
+            console.log(`Fuse ${logicComp.id} replaced with ${ratingMa} mA rating`);
+            this.dialogCooldown = true;
+            this.time.delayedCall(800, () => { this.dialogCooldown = false; });
+            closeDialog();
+            this.rebuildGraph();
+          } else {
+            errorText.setText('Prosim vnesi veljavno vrednost med 10 in 10000 mA');
+          }
+        });
+    }
+
+    // Confirm button (set rating)
+    const confirmBg = this.add.graphics();
+    confirmBg.setDepth(2001).setScrollFactor(0);
+    confirmBg.fillStyle(0x888888, 1);
+    const confirmX = isBlown ? width / 2 + buttonWidth / 2 + 15 : width / 2 + 10;
+    confirmBg.fillRoundedRect(confirmX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+
+    const confirmBtn = this.add.text(confirmX + buttonWidth / 2, buttonY, 'Potrdi', {
+      fontSize: '16px',
+      color: '#ffffff',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerover', () => {
+        confirmBg.clear();
+        confirmBg.fillStyle(0x666666, 1);
+        confirmBg.fillRoundedRect(confirmX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerout', () => {
+        confirmBg.clear();
+        confirmBg.fillStyle(0x888888, 1);
+        confirmBg.fillRoundedRect(confirmX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerdown', () => {
+        const ratingMa = parseFloat(inputField.value);
+        if (!isNaN(ratingMa) && ratingMa >= 10 && ratingMa <= 10000) {
+          logicComp.maxCurrent = ratingMa / 1000; // Convert mA to A
+          console.log(`Fuse ${logicComp.id} rating set to ${ratingMa} mA`);
+          this.dialogCooldown = true;
+          this.time.delayedCall(800, () => { this.dialogCooldown = false; });
+          closeDialog();
+          this.rebuildGraph();
+        } else {
+          errorText.setText('Prosim vnesi veljavno vrednost med 10 in 10000 mA');
+        }
+      });
+
+    // Allow Enter key to confirm
+    inputField.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        if (isBlown) {
           replaceBtn.emit('pointerdown');
         } else {
           confirmBtn.emit('pointerdown');
@@ -3943,6 +4964,48 @@ case "voltmeter":
   }
 
   /**
+   * Update the scrollable panel position and indicators
+   */
+  updatePanelScroll() {
+    const { height } = this.cameras.main;
+    const panelTop = 80; // Below the title and scroll up indicator
+    const panelBottom = height - 20;
+    
+    // Update each panel component's position based on scroll
+    if (this.panelComponentObjects) {
+      const componentSpacing = 100;
+      const componentStartY = 95;
+      
+      for (let i = 0; i < this.panelComponentObjects.length; i++) {
+        const comp = this.panelComponentObjects[i];
+        if (comp && comp.active) {
+          const baseY = componentStartY + (i * componentSpacing);
+          const newY = baseY - this.panelScrollY;
+          comp.y = newY;
+          
+          // Hide components that are outside the visible panel area
+          const isVisible = newY > panelTop && newY < panelBottom;
+          comp.setVisible(isVisible);
+          
+          // Also update the label if it exists
+          const label = comp.getData("panelLabel");
+          if (label) {
+            label.setVisible(isVisible);
+          }
+        }
+      }
+    }
+    
+    // Update scroll indicators
+    if (this.scrollUpIndicator) {
+      this.scrollUpIndicator.setAlpha(this.panelScrollY > 0 ? 0.8 : 0);
+    }
+    if (this.scrollDownIndicator) {
+      this.scrollDownIndicator.setAlpha(this.panelScrollY < this.panelMaxScroll ? 0.8 : 0);
+    }
+  }
+
+  /**
    * Update minimap to show current viewport and components
    */
   updateMinimap() {
@@ -4069,7 +5132,9 @@ case "voltmeter":
         switch: "Stikalo",
         wire: "Žica",
         ammeter: "Ampermeter",
-        voltmeter: "Voltmeter"
+        voltmeter: "Voltmeter",
+        led: "LED",
+        fuse: "Varovalka"
       };
       const typeName = typeNames[logicComp?.type] || "Komponenta";
       this.showJumpFeedback(`→ ${typeName}`, 0x3399ff);
@@ -4198,6 +5263,18 @@ case "voltmeter":
       if (this.leftPanelOverlay) {
         this.leftPanelOverlay.setDisplaySize(this.panelWidth, height);
       }
+      
+      // Update scroll indicators position and recalculate max scroll
+      if (this.scrollDownIndicator) {
+        this.scrollDownIndicator.setPosition(this.panelWidth / 2, height - 15);
+      }
+      const componentSpacing = 100;
+      const componentStartY = 95;
+      const numComponents = 9;
+      const totalContentHeight = componentStartY + (numComponents * componentSpacing);
+      this.panelMaxScroll = Math.max(0, totalContentHeight - height + 50);
+      this.panelScrollY = Phaser.Math.Clamp(this.panelScrollY, this.panelMinScroll, this.panelMaxScroll);
+      this.updatePanelScroll();
       
       // Reposition prompt text (challenge mode)
       if (this.promptText) {
