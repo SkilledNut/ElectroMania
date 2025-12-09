@@ -1,288 +1,207 @@
-import Phaser from 'phaser';
+import Phaser from "phaser";
+import { Theme } from "../ui/theme";
+import UIButton from "../ui/UIButton";
 
 export default class MenuScene extends Phaser.Scene {
-    constructor() {
-        super('MenuScene');
-        this.isSwitchOn = false;
-        this.title = null;
-        this.loginButton = null;
-        this.fixedComponents = [];
-        this.gridGraphics = null;
-        this.desk = null;
+  constructor() {
+    super("MenuScene");
+    this.particles = [];
+    this.floatingElements = [];
+  }
+
+  create() {
+    const { width, height } = this.scale;
+
+    this.children.removeAll(true);
+    this.particles = [];
+    this.floatingElements = [];
+
+    // Background
+    this.createBackground(width, height);
+
+    // Animated particles
+    this.createParticles(width, height);
+
+    // Floating geometric shapes
+    this.createFloatingShapes(width, height);
+
+    // Main UI
+    this.createUI(width, height);
+
+    // Add resize listener
+    this.scale.on("resize", this.resize, this);
+
+    // Auto-login check
+    const username = localStorage.getItem("username");
+    if (username) {
+      this.scene.start("LabScene");
     }
+  }
 
-    preload() {
-        this.load.image('battery', 'src/components/battery.png');
-        this.load.image('lamp', 'src/components/lamp.png');
-        this.load.image('resistor', 'src/components/resistor.png');
-        this.load.image('switch-off', 'src/components/switch-off.png');
-        this.load.image('switch-on', 'src/components/switch-on.png');
-        this.load.image('wire', 'src/components/wire.png');
+  createBackground(width, height) {
+    this.cameras.main.setBackgroundColor(Theme.colors.background);
+
+    // Gradient
+    const bg = this.add.graphics();
+    bg.fillGradientStyle(
+      Theme.colors.background,
+      Theme.colors.background,
+      0x1e1b4b, // Deep indigo
+      0x312e81, // Indigo
+      1
+    );
+    bg.fillRect(0, 0, width, height);
+    bg.setDepth(-100);
+
+    // Grid
+    const gridGraphics = this.add.graphics();
+    gridGraphics.lineStyle(1, Theme.colors.primary, 0.05);
+    gridGraphics.setDepth(-90);
+
+    const gridSize = 60;
+    for (let x = 0; x < width; x += gridSize) {
+      gridGraphics.beginPath();
+      gridGraphics.moveTo(x, 0);
+      gridGraphics.lineTo(x, height);
+      gridGraphics.strokePath();
     }
-
-    create() {
-        const { width, height } = this.scale;
-
-        this.children.removeAll(true); // odstrani vse objekte iz prejsnje scene
-        this.fixedComponents = [];
-        this.isSwitchOn = false;
-
-        // ozdaje
-        this.createDeskBackground(width, height);
-
-        // zice 
-        this.cameras.main.setBackgroundColor('#ffffff');
-        const wireThickness = 9.5;
-        const wireColor = 0x1a1a1a;
-        const rectWidth = 900;
-        const rectHeight = 440;
-        const rectX = width / 2;
-        const rectY = height / 2 - 30;
-
-        // Add resize listener
-        this.scale.on('resize', this.resize, this);
-
-        const leftWireX = rectX - rectWidth / 2;
-        const rightWireX = rectX + rectWidth / 2;
-        const topWireY = rectY - rectHeight / 2;
-        const bottomWireY = rectY + rectHeight / 2;
-
-        this.add.rectangle(rectX, topWireY, rectWidth + wireThickness, wireThickness, wireColor);
-        this.add.rectangle(leftWireX - wireThickness / 2, rectY, wireThickness, rectHeight + wireThickness, wireColor);
-        this.add.rectangle(rightWireX + wireThickness / 2, rectY, wireThickness, rectHeight + wireThickness, wireColor);
-
-        // spodanji zici
-        const gapWidth = 250;
-        const halfBottomWidth = (rectWidth - gapWidth) / 2;
-        this.add.rectangle(rectX - gapWidth / 2 - halfBottomWidth / 2, bottomWireY, halfBottomWidth, wireThickness, wireColor);
-        this.add.rectangle(rectX + gapWidth / 2 + halfBottomWidth / 2, bottomWireY, halfBottomWidth, wireThickness, wireColor);
-
-        // stikalo
-        const switchOffsetY = -18.5;
-        this.switchButton = this.add.image(rectX, bottomWireY + switchOffsetY, 'switch-off')
-            .setScale(0.7)
-            .setOrigin(0.5)
-            .setInteractive({ useHandCursor: true })
-            .on('pointerdown', () => this.toggleSwitch());
-
-        // ui elem
-        this.createUI();
-
-        const username = localStorage.getItem('username');
-        if (username) {
-            this.scene.start('LabScene');
-            return;
-        } 
-
-        // komponente
-        this.createComponents(width, height, rectX, rectY);
-        this.hideComponents();
+    for (let y = 0; y < height; y += gridSize) {
+      gridGraphics.beginPath();
+      gridGraphics.moveTo(0, y);
+      gridGraphics.lineTo(width, y);
+      gridGraphics.strokePath();
     }
+  }
 
-    createDeskBackground(width, height) {
-        // svetla lesena povrsina
-        this.desk = this.add.rectangle(0, 0, width, height, 0xe0c9a6)
-            .setOrigin(0)
-            .setAlpha(0)
-            .setDepth(-2);
+  createParticles(width, height) {
+    for (let i = 0; i < 30; i++) {
+      const x = Phaser.Math.Between(0, width);
+      const y = Phaser.Math.Between(0, height);
+      const size = Phaser.Math.Between(2, 4);
+      const alpha = Phaser.Math.FloatBetween(0.1, 0.4);
 
-        // mreza
-        this.gridGraphics = this.add.graphics({ alpha: 0 });
-        this.gridGraphics.setDepth(-1);
-        this.gridGraphics.lineStyle(1, 0x8b7355, 0.35);
+      const particle = this.add.circle(x, y, size, Theme.colors.primary, alpha);
+      particle.setDepth(-80);
+      this.particles.push(particle);
 
-        const gridSize = 40;
-        for (let x = 0; x < width; x += gridSize) {
-            this.gridGraphics.beginPath();
-            this.gridGraphics.moveTo(x, 0);
-            this.gridGraphics.lineTo(x, height);
-            this.gridGraphics.strokePath();
-        }
-        for (let y = 0; y < height; y += gridSize) {
-            this.gridGraphics.beginPath();
-            this.gridGraphics.moveTo(0, y);
-            this.gridGraphics.lineTo(width, y);
-            this.gridGraphics.strokePath();
-        }
+      this.tweens.add({
+        targets: particle,
+        y: y - Phaser.Math.Between(50, 150),
+        alpha: { from: alpha, to: 0 },
+        duration: Phaser.Math.Between(3000, 6000),
+        repeat: -1,
+        yoyo: true,
+        ease: "Sine.easeInOut",
+      });
     }
+  }
 
-    createComponents(width, height, rectX, rectY) {
-        const positions = [
-            { x: 150, y: 150, type: 'battery' },
-            { x: width - 150, y: 170, type: 'resistor' },
-            { x: 120, y: height - 180, type: 'resistor' },
-            { x: width - 180, y: height - 160, type: 'battery' },
-            { x: rectX - 550, y: rectY, type: 'lamp' },
-            { x: rectX + 550, y: rectY - 20, type: 'lamp' },
-            { x: rectX + 50, y: rectY + 290, type: 'battery' },
-            { x: rectX + 300, y: rectY - 280, type: 'lamp' },
-            { x: rectX - 400, y: rectY - 280, type: 'resistor' },
-            { x: rectX, y: rectY - 300, type: 'battery' },
-            { x: rectX - 350, y: rectY + 290, type: 'lamp' },
-            { x: rectX + 350, y: rectY + 290, type: 'resistor' }
-        ];
+  createFloatingShapes(width, height) {
+    const shapes = [
+      {
+        x: width * 0.15,
+        y: height * 0.2,
+        size: 80,
+        color: Theme.colors.secondary,
+      },
+      {
+        x: width * 0.85,
+        y: height * 0.3,
+        size: 100,
+        color: Theme.colors.primary,
+      },
+      {
+        x: width * 0.12,
+        y: height * 0.75,
+        size: 60,
+        color: Theme.colors.accent,
+      },
+      {
+        x: width * 0.88,
+        y: height * 0.8,
+        size: 70,
+        color: Theme.colors.secondary,
+      },
+    ];
 
-        positions.forEach(pos => {
-            const img = this.add.image(pos.x, pos.y, pos.type)
-                .setScale(0.27)
-                .setAngle(Phaser.Math.Between(-25, 25))
-                .setAlpha(0)
-                .setDepth(0);
-            this.fixedComponents.push(img);
-        });
-    }
+    shapes.forEach((shape) => {
+      const graphics = this.add.graphics();
+      graphics.lineStyle(2, shape.color, 0.1);
+      graphics.strokeRoundedRect(
+        -shape.size / 2,
+        -shape.size / 2,
+        shape.size,
+        shape.size,
+        12
+      );
+      graphics.setPosition(shape.x, shape.y);
+      graphics.setRotation(Phaser.Math.DegToRad(45));
+      graphics.setDepth(-70);
 
-    showComponents() {
-        this.tweens.add({ targets: this.desk, alpha: 1, duration: 800 });
-        this.tweens.add({ targets: this.gridGraphics, alpha: 1, duration: 1200 });
+      this.tweens.add({
+        targets: graphics,
+        y: shape.y + 20,
+        rotation: graphics.rotation + 0.2,
+        duration: 4000,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+    });
+  }
 
-        this.fixedComponents.forEach((img, i) => {
-            this.tweens.add({
-                targets: img,
-                alpha: 0.9,
-                duration: 600,
-                delay: i * 50
-            });
-        });
-    }
+  createUI(width, height) {
+    const centerX = width / 2;
+    const centerY = height / 2;
 
-    hideComponents() {
-        this.desk?.setAlpha(0);
-        this.gridGraphics?.setAlpha(0);
-        this.fixedComponents.forEach(img => img.setAlpha(0));
-    }
+    // Title
+    const titleText = this.add
+      .text(centerX, centerY - 80, "ELECTRO MANIA", {
+        ...Theme.text.header,
+        fontSize: "64px",
+        color: "#ffffff",
+      })
+      .setOrigin(0.5);
 
-    toggleSwitch() {
-        this.isSwitchOn = !this.isSwitchOn;
+    // Subtitle
+    this.add
+      .text(centerX, centerY, "Gradi. Simuliraj. Uči se.", {
+        ...Theme.text.subheader,
+        color: Theme.colors.text.secondary,
+        fontSize: "20px",
+        letterSpacing: 2,
+      })
+      .setOrigin(0.5);
 
-        if (this.isSwitchOn) {
-            this.switchButton.setTexture('switch-on');
-            this.switchButton.y += 14;
+    // Enter Button
+    new UIButton(
+      this,
+      centerX,
+      centerY + 100,
+      "VSTOP V LABORATORIJ",
+      () => {
+        this.scene.start("LoginScene");
+      },
+      {
+        width: 300, // Increased width to accommodate text
+        height: 80, // Increased height for better visibility
+        fontSize: "24px", // Adjusted font size for better readability
+        color: Theme.colors.primary,
+      }
+    );
 
-            // bel napis
-            this.title.setStyle({
-                color: '#ffffff',
-                shadow: {
-                    offsetX: 0,
-                    offsetY: 0,
-                    color: '#ffdd55', // toplo rumen sij
-                    blur: 40,
-                    fill: true
-                }
-            });
+    // Version
+    this.add
+      .text(width - 20, height - 20, "v1.0.0", {
+        fontFamily: Theme.fonts.primary,
+        fontSize: "14px",
+        color: Theme.colors.text.secondary,
+      })
+      .setOrigin(1);
+  }
 
-            this.titleTween.resume();
-            this.enableStartButton(true);
-            this.showComponents();
-
-        } else {
-            this.switchButton.setTexture('switch-off');
-            this.switchButton.y -= 14;
-            this.title.setStyle({
-                color: '#222222',
-                shadow: { offsetX: 0, offsetY: 0, color: '#00000000', blur: 0, fill: false }
-            });
-            this.titleTween.pause();
-            this.title.setScale(1);
-            this.enableStartButton(false);
-            this.hideComponents();
-        }
-    }
-
-    createUI() {
-       const rectX = this.scale.width / 2;
-        const rectY = this.scale.height / 2 - 50;
-        
-        // vogali gumba
-        const cornerRadius = 15; 
-        const buttonWidth = 250; 
-        const buttonHeight = 60;
-        
-        // ozadje gumba
-        this.startButtonBackground = this.add.graphics();
-        this.startButtonBackground.fillStyle(0xdddddd, 1); // siva
-        this.startButtonBackground.fillRoundedRect(
-            rectX - buttonWidth / 2, // X zacetek
-            (rectY + 100) - buttonHeight / 2, // Y zacetek
-            buttonWidth, 
-            buttonHeight, 
-            cornerRadius // Polmer!
-        );
-        this.startButtonBackground.setDepth(-1); 
-
-        // naslov
-        this.title = this.add.text(rectX, rectY, 'LABORATORIJ', { 
-            fontFamily: 'Arial', 
-            fontSize: '72px', 
-            fontStyle: 'bold', 
-            color: '#222222' 
-        }).setOrigin(0.5);
-
-        // gumb
-        this.loginButton = this.add.text(rectX, rectY + 100, '▶ Začni igro', {
-            fontFamily: 'Arial',
-            fontSize: '32px',
-            color: '#aaaaaa', 
-        })
-            .setOrigin(0.5)
-            .setInteractive({ useHandCursor: true })
-            
-            // hower
-            .on('pointerover', () => {
-                if (this.isSwitchOn)
-                    this.startButtonBackground.fillStyle(0x0f5cadff, 1).fillRoundedRect(rectX - buttonWidth / 2, (rectY + 100) - buttonHeight / 2, buttonWidth, buttonHeight, cornerRadius);
-            })
-            .on('pointerout', () => {
-                if (this.isSwitchOn)
-                    this.startButtonBackground.fillStyle(0x3399ff, 1).fillRoundedRect(rectX - buttonWidth / 2, (rectY + 100) - buttonHeight / 2, buttonWidth, buttonHeight, cornerRadius);
-            })
-            .on('pointerdown', () => {
-                if (this.isSwitchOn) this.scene.start('LoginScene');
-            });
-
-        console.log(`${localStorage.getItem('username')}`);
-
-        this.titleTween = this.tweens.add({
-            targets: this.title,
-            scale: { from: 1, to: 1.05 },
-            duration: 1500,
-            yoyo: true,
-            repeat: -1,
-            paused: true
-        });
-    }
-
-enableStartButton(isActive) {
-        // zaobljen gumb
-        const cornerRadius = 15;
-        const buttonWidth = 250;
-        const buttonHeight = 60;
-        const rectX = this.scale.width / 2;
-        const rectY = this.scale.height / 2 - 50;
-
-        if (isActive) {
-            this.loginButton.setStyle({
-                color: '#ffffff', // spremeni samo barvo besedila
-            });
-            // novo ozadje
-            this.startButtonBackground.clear();
-            this.startButtonBackground.fillStyle(0x3399ff, 1); 
-            this.startButtonBackground.fillRoundedRect(rectX - buttonWidth / 2, (rectY + 100) - buttonHeight / 2, buttonWidth, buttonHeight, cornerRadius);
-        } else {
-            this.loginButton.setStyle({
-                color: '#aaaaaa', // spremeni samo barvo besedila
-            });
-            // novo ozadje
-            this.startButtonBackground.clear();
-            this.startButtonBackground.fillStyle(0xdddddd, 1);
-            this.startButtonBackground.fillRoundedRect(rectX - buttonWidth / 2, (rectY + 100) - buttonHeight / 2, buttonWidth, buttonHeight, cornerRadius);
-        }
-    }
-
-    resize(gameSize) {
-        const { width, height } = gameSize;
-        
-        // Recreate the entire scene on resize to properly reposition all elements
-        this.scene.restart();
-    }
+  resize(gameSize) {
+    const { width, height } = gameSize;
+    this.scene.restart();
+  }
 }

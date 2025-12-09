@@ -1,201 +1,243 @@
-import Phaser from 'phaser';
-import { config } from '../config'; // new import to call backend
+import Phaser from "phaser";
+import { config } from "../config";
+import { Theme } from "../ui/theme";
+import UIPanel from "../ui/UIPanel";
+import UIButton from "../ui/UIButton";
+
 export default class ScoreboardScene extends Phaser.Scene {
-    constructor() {
-        super('ScoreboardScene');
+  constructor() {
+    super("ScoreboardScene");
+  }
+
+  init(data) {
+    this.cameFromMenu = data.cameFromMenu || false;
+  }
+
+  preload() {
+    for (let i = 1; i <= 14; i++) {
+      this.load.image(`avatar${i}`, `src/avatars/avatar${i}.png`);
+    }
+  }
+
+  create() {
+    const { width, height } = this.scale;
+    this.scale.on("resize", this.resize, this);
+
+    // Background
+    this.createBackground(width, height);
+    this.createParticles(width, height);
+
+    const centerX = width / 2;
+    const centerY = height / 2;
+
+    // Panel
+    const panelWidth = Math.min(700, width * 0.95);
+    const panelHeight = Math.min(550, height * 0.8);
+    new UIPanel(this, centerX, centerY, panelWidth, panelHeight, "LESTVICA");
+
+    // Back Button
+    const backBtn = this.add
+      .text(40, 40, "← Nazaj", {
+        ...Theme.text.body,
+        color: Theme.colors.text.secondary,
+      })
+      .setInteractive({ useHandCursor: true })
+      .on("pointerover", () => backBtn.setColor(Theme.colors.text.primary))
+      .on("pointerout", () => backBtn.setColor(Theme.colors.text.secondary))
+      .on("pointerdown", () => {
+        this.scene.start(this.cameFromMenu ? "LabScene" : "WorkspaceScene");
+      });
+
+    // Leaderboard Setup
+    this.leaderboardStartY = centerY - panelHeight / 2 + 100;
+    this.leaderboardPanelX = centerX - panelWidth / 2;
+    this.leaderboardPanelWidth = panelWidth;
+    this.userLogged = localStorage.getItem("username");
+
+    this.loadLeaderboard();
+
+    // ESC key
+    this.input.keyboard.on("keydown-ESC", () => {
+      this.scene.start(this.cameFromMenu ? "LabScene" : "WorkspaceScene");
+    });
+  }
+
+  createBackground(width, height) {
+    this.cameras.main.setBackgroundColor(Theme.colors.background);
+    const bg = this.add.graphics();
+    bg.fillGradientStyle(
+      Theme.colors.background,
+      Theme.colors.background,
+      0x1e1b4b,
+      0x312e81,
+      1
+    );
+    bg.fillRect(0, 0, width, height);
+    bg.setDepth(-100);
+
+    const grid = this.add.graphics();
+    grid.lineStyle(1, Theme.colors.primary, 0.05);
+    const size = 60;
+    for (let x = 0; x < width; x += size) {
+      grid.moveTo(x, 0);
+      grid.lineTo(x, height);
+    }
+    for (let y = 0; y < height; y += size) {
+      grid.moveTo(0, y);
+      grid.lineTo(width, y);
+    }
+    grid.strokePath();
+    grid.setDepth(-90);
+  }
+
+  createParticles(width, height) {
+    for (let i = 0; i < 20; i++) {
+      const x = Phaser.Math.Between(0, width);
+      const y = Phaser.Math.Between(0, height);
+      this.add
+        .circle(x, y, Phaser.Math.Between(2, 4), Theme.colors.primary, 0.2)
+        .setDepth(-80);
+    }
+  }
+
+  async loadLeaderboard() {
+    const token = localStorage.getItem("token");
+    let users = JSON.parse(localStorage.getItem("users")) || [];
+
+    try {
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const resp = await fetch(`${config.API_URL}/auth/leaderboard`, {
+        headers,
+      });
+      if (resp.ok) {
+        const serverUsers = await resp.json();
+        users = serverUsers.map((u) => ({
+          username: u.username,
+          profilePic: u.profilePic,
+          points: u.points ?? u.score ?? 0,
+        }));
+        localStorage.setItem("users", JSON.stringify(users));
+      }
+    } catch (err) {
+      console.warn("Error fetching leaderboard:", err);
     }
 
-    init(data) {
-        this.cameFromMenu = data.cameFromMenu || false;
+    // Mock update for demo (from original code)
+    const userToUpdate = users.find((u) => u.username === "enej");
+    if (userToUpdate) {
+      userToUpdate.points = 130;
+      userToUpdate.score = 130;
+      localStorage.setItem("users", JSON.stringify(users));
     }
 
-    preload() {
-        // avatarji
-        for (let i = 1; i <= 14; i++) {
-            this.load.image(`avatar${i}`, `src/avatars/avatar${i}.png`);
-        }
-    }
+    users.sort(
+      (a, b) => (b.points ?? b.score ?? 0) - (a.points ?? a.score ?? 0)
+    );
+    this.renderLeaderboard(users);
+  }
 
-    create() {
-        const { width, height } = this.scale;
+  renderLeaderboard(users) {
+    const panelX = this.leaderboardPanelX;
+    const panelY = this.leaderboardStartY;
+    const panelWidth = this.leaderboardPanelWidth;
+    const userLogged = this.userLogged;
+    const isSmallScreen = panelWidth < 500;
 
-        // Add resize listener
-        this.scale.on('resize', this.resize, this);
+    users.forEach((user, index) => {
+      const y = panelY + index * 50;
+      const rank = index + 1;
 
-        // ozadje
-        // svetla stena
-        this.add.rectangle(0, 0, width, height - 150, 0xe8e8e8).setOrigin(0);
-        // tla
-        this.add.rectangle(0, height - 150, width, 150, 0xd4c4a8).setOrigin(0);
+      // Rank
+      let rankColor = Theme.colors.text.secondary;
+      if (rank === 1) rankColor = 0xffd700;
+      else if (rank === 2) rankColor = 0xc0c0c0;
+      else if (rank === 3) rankColor = 0xcd7f32;
 
-        // miza
-        const tableX = width / 2;
-        const tableY = height / 2 + 50;
-        const tableWidth = 600;
-        const tableHeight = 280;
+      const rankX = isSmallScreen ? panelX + 30 : panelX + 50;
+      this.add.circle(
+        rankX,
+        y + 20,
+        18,
+        typeof rankColor === "number" ? rankColor : 0x8b9aff,
+        0.2
+      );
+      this.add
+        .text(rankX, y + 20, `${rank}`, {
+          ...Theme.text.body,
+          fontStyle: "700",
+        })
+        .setOrigin(0.5);
 
-        this.add.rectangle(tableX, tableY, tableWidth, 30, 0x8b4513).setOrigin(0.5);
-        const surface = this.add.rectangle(tableX, tableY + 15, tableWidth - 30, tableHeight - 30, 0xa0826d).setOrigin(0.5, 0);
+      // Avatar
+      let usernameX = isSmallScreen ? panelX + 70 : panelX + 160;
+      if (!isSmallScreen && user.profilePic) {
+        const avatarBg = this.add.circle(
+          panelX + 110,
+          y + 20,
+          20,
+          Theme.colors.primary,
+          0.2
+        );
+        const avatar = this.add
+          .image(panelX + 110, y + 20, user.profilePic)
+          .setDisplaySize(36, 36);
+        avatar.setMask(avatarBg.createGeometryMask());
+      }
 
-        // mreža
-        const grid = this.add.graphics();
-        grid.lineStyle(1, 0x8b7355, 0.3);
-        const gridSize = 30;
-        const gridStartX = tableX - (tableWidth - 30) / 2;
-        const gridStartY = tableY + 15;
-        const gridEndX = tableX + (tableWidth - 30) / 2;
-        const gridEndY = tableY + 15 + (tableHeight - 30);
+      // Username
+      const isCurrentUser = user.username === userLogged;
+      const color = isCurrentUser
+        ? Theme.colors.primary
+        : Theme.colors.text.primary;
 
-        for (let x = gridStartX; x <= gridEndX; x += gridSize) {
-            grid.beginPath();
-            grid.moveTo(x, gridStartY);
-            grid.lineTo(x, gridEndY);
-            grid.strokePath();
-        }
-        for (let y = gridStartY; y <= gridEndY; y += gridSize) {
-            grid.beginPath();
-            grid.moveTo(gridStartX, y);
-            grid.lineTo(gridEndX, y);
-            grid.strokePath();
-        }
+      let displayUsername = user.username;
+      if (isSmallScreen && displayUsername.length > 10) {
+        displayUsername = displayUsername.substring(0, 8) + "...";
+      }
 
-        // nogice mize
-        const legWidth = 20;
-        const legHeight = 150;
-        this.add.rectangle(tableX - tableWidth / 2 + 40, tableY + tableHeight / 2 + 20, legWidth, legHeight, 0x654321);
-        this.add.rectangle(tableX + tableWidth / 2 - 40, tableY + tableHeight / 2 + 20, legWidth, legHeight, 0x654321);
+      this.add
+        .text(usernameX, y + 10, displayUsername, {
+          ...Theme.text.body,
+          color: typeof color === "number" ? "#" + color.toString(16) : color, // Ensure string for color if needed, but Theme uses hex numbers for graphics and strings for text usually. Theme.colors.primary is number.
+          // Wait, Theme.colors.primary is 0x3b82f6 (number). Text color needs string '#3b82f6'.
+          // I should fix Theme to have string colors for text or convert.
+          // Theme.text.body.color is string.
+          // Let's use Theme.text.accent for current user.
+        })
+        .setColor(isCurrentUser ? Theme.text.accent : Theme.text.primary);
 
-        // okvir
-        const panelWidth = 600;
-        const panelHeight = 400;
-        const panelX = width / 2 - panelWidth / 2;
-        const panelY = height / 2 - panelHeight / 2 - 30;
+      // Points
+      const pointsToShow = user.points ?? user.score ?? 0;
+      const pointsWidth = isSmallScreen ? 70 : 90;
+      const pointsX = panelX + panelWidth - (isSmallScreen ? 90 : 130);
 
-        const panel = this.add.graphics();
-        panel.fillStyle(0xffffff, 0.92);
-        panel.fillRoundedRect(panelX, panelY, panelWidth, panelHeight, 25);
-        panel.lineStyle(3, 0xcccccc, 1);
-        panel.strokeRoundedRect(panelX, panelY, panelWidth, panelHeight, 25);
+      const pointsBg = this.add.graphics();
+      pointsBg.fillStyle(Theme.colors.primary, 0.2);
+      pointsBg.fillRoundedRect(pointsX, y + 8, pointsWidth, 28, 8);
 
-        // naslov
-        this.add.text(width / 2, panelY + 35, 'LESTVICA', {
-            fontFamily: 'Arial',
-            fontSize: '36px',
-            fontStyle: 'bold',
-            color: '#222'
-        }).setOrigin(0.5);
+      this.add
+        .text(pointsX + pointsWidth / 2, y + 22, `${pointsToShow} pts`, {
+          ...Theme.text.body,
+          fontSize: isSmallScreen ? "14px" : "16px",
+          color: Theme.text.accent,
+          fontStyle: "600",
+        })
+        .setOrigin(0.5);
 
-        // prepare container where rows will be rendered
-        this.leaderboardStartY = panelY + 90;
-        this.leaderboardPanelX = panelX;
-        this.leaderboardPanelWidth = panelWidth;
-        this.userLogged = localStorage.getItem('username');
+      // Highlight row
+      if (isCurrentUser) {
+        const highlight = this.add.graphics();
+        highlight.fillStyle(Theme.colors.primary, 0.1);
+        highlight.fillRoundedRect(panelX + 10, y, panelWidth - 20, 45, 8);
+        highlight.setDepth(-1);
+      }
+    });
+  }
 
-        // Load users (from backend if possible) then render
-        this.loadLeaderboard();
-        
-
-        // ESC tipka
-        this.input.keyboard.on('keydown-ESC', () => {
-            if (this.cameFromMenu) {
-                this.scene.start('LabScene');
-            }
-            else {
-                this.scene.start('LabScene');
-            }
-        });
-
-        // gumb
-        if (this.cameFromMenu === false) {
-            const backButton = this.add.text(width / 2, panelY + panelHeight - 40, '↩ Nazaj', {
-                fontFamily: 'Arial',
-                fontSize: '22px',
-                color: '#0066ff',
-                padding: { x: 20, y: 10 }
-            })
-                .setOrigin(0.5)
-                .setInteractive({ useHandCursor: true })
-                .on('pointerover', () => backButton.setStyle({ color: '#0044cc' }))
-                .on('pointerout', () => backButton.setStyle({ color: '#0066ff' }))
-                .on('pointerdown', () => {
-                    this.scene.start('WorkspaceScene');
-                });
-        }
-
-    }
-
-    async loadLeaderboard() {
-        const token = localStorage.getItem('token');
-        let users = JSON.parse(localStorage.getItem('users')) || [];
-
-        try {
-            const headers = { 'Content-Type': 'application/json' };
-            if (token) headers['Authorization'] = `Bearer ${token}`;
-
-            const resp = await fetch(`${config.API_URL}/auth/leaderboard`, { headers });
-            if (resp.ok) {
-                const serverUsers = await resp.json();
-                users = serverUsers.map(u => ({
-                    username: u.username,
-                    profilePic: u.profilePic,
-                    points: u.points ?? u.score ?? 0
-                }));
-                localStorage.setItem('users', JSON.stringify(users));
-            } else {
-                console.warn('Failed to fetch leaderboard from server', await resp.text());
-            }
-        } catch (err) {
-            console.warn('Error fetching leaderboard:', err);
-        }
-
-
-        const userToUpdate = users.find(u => u.username === 'enej');
-        if (userToUpdate) {
-            userToUpdate.points = 130;
-            userToUpdate.score = 130;
-            localStorage.setItem('users', JSON.stringify(users));
-        }
-
-        users.sort((a, b) => ((b.points ?? b.score ?? 0) - (a.points ?? a.score ?? 0)));
-
-        this.renderLeaderboard(users);
-    }
-
-    renderLeaderboard(users) {
-        const panelX = this.leaderboardPanelX;
-        const panelY = this.leaderboardStartY;
-        const panelWidth = this.leaderboardPanelWidth;
-        const userLogged = this.userLogged;
-
-        users.forEach((user, index) => {
-            const y = panelY + index * 35;
-            const rank = index + 1;
-
-            if (user.profilePic) {
-                this.add.image(panelX + 60, y + 15, user.profilePic)
-                    .setDisplaySize(40, 40)
-                    .setOrigin(0.5);
-            }
-
-            this.add.text(panelX + 100, y + 5, `${rank}.`, { fontSize: '22px', color: '#444' });
-
-            const style = (user.username === userLogged)
-                ? { fontSize: '22px', color: '#0f5cad', fontStyle: 'bold' }
-                : { fontSize: '22px', color: '#222' };
-            this.add.text(panelX + 140, y + 5, user.username, style);
-
-            const pointsToShow = user.points ?? user.score ?? 0;
-            this.add.text(panelX + panelWidth - 100, y + 5, `${pointsToShow}`, {
-                fontSize: '22px',
-                color: '#0044cc'
-            }).setOrigin(1, 0);
-        });
-    }
-
-    resize(gameSize) {
-        const { width, height } = gameSize;
-        
-        // Recreate the entire scene on resize to properly reposition all elements
-        this.scene.restart();
-    }
+  resize(gameSize) {
+    const { width, height } = gameSize;
+    this.scene.restart();
+  }
 }

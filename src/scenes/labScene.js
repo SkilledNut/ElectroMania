@@ -1,235 +1,288 @@
-import Phaser from 'phaser';
+import Phaser from "phaser";
+import { Theme } from "../ui/theme";
+import UIButton from "../ui/UIButton";
 
 export default class LabScene extends Phaser.Scene {
   constructor() {
-    super('LabScene');
+    super("LabScene");
   }
 
   preload() {
-        this.load.image('avatar1', 'src/avatars/avatar1.png');
-        this.load.image('avatar2', 'src/avatars/avatar2.png');
-        this.load.image('avatar3', 'src/avatars/avatar3.png');
-        this.load.image('avatar4', 'src/avatars/avatar4.png');
-        this.load.image('avatar5', 'src/avatars/avatar5.png');
-        this.load.image('avatar6', 'src/avatars/avatar6.png');
-        this.load.image('avatar7', 'src/avatars/avatar7.png');
-        this.load.image('avatar8', 'src/avatars/avatar8.png');
-        this.load.image('avatar9', 'src/avatars/avatar9.png');
-        this.load.image('avatar10', 'src/avatars/avatar10.png');
-        this.load.image('avatar11', 'src/avatars/avatar11.png');
+    // Load avatars
+    for (let i = 1; i <= 11; i++) {
+      this.load.image(`avatar${i}`, `src/avatars/avatar${i}.png`);
     }
+  }
 
   create() {
     const { width, height } = this.cameras.main;
-    
-    // Add resize listener
-    this.scale.on('resize', this.resize, this);
-    
-    // ozadje laboratorija
-    this.add.rectangle(0, 0, width, height, 0xf0f0f0).setOrigin(0);
-    
-    // stena
-    this.add.rectangle(0, 0, width, height - 150, 0xe8e8e8).setOrigin(0);
-    
-    // tla
-    this.add.rectangle(0, height - 150, width, 150, 0xd4c4a8).setOrigin(0);
-    
-    // miza
-    const tableX = width / 2;
-    const tableY = height / 2 + 50;
-    const tableWidth = 500;
-    const tableHeight = 250;
-    
-    // miza (del, ki se klikne)
-    const tableTop = this.add.rectangle(tableX, tableY, tableWidth, 30, 0x8b4513).setOrigin(0.5);
-    
-    // delovna površina mize
-    const tableSurface = this.add.rectangle(tableX, tableY + 15, tableWidth - 30, tableHeight - 30, 0xa0826d).setOrigin(0.5, 0);
-    
-    // mreža
-    const gridGraphics = this.add.graphics();
-    gridGraphics.lineStyle(1, 0x8b7355, 0.3);
-    const gridSize = 30;
-    const gridStartX = tableX - (tableWidth - 30) / 2;
-    const gridStartY = tableY + 15;
-    const gridEndX = tableX + (tableWidth - 30) / 2;
-    const gridEndY = tableY + 15 + (tableHeight - 30);
-    
-    for (let x = gridStartX; x <= gridEndX; x += gridSize) {
-      gridGraphics.beginPath();
-      gridGraphics.moveTo(x, gridStartY);
-      gridGraphics.lineTo(x, gridEndY);
-      gridGraphics.strokePath();
-    }
-    for (let y = gridStartY; y <= gridEndY; y += gridSize) {
-      gridGraphics.beginPath();
-      gridGraphics.moveTo(gridStartX, y);
-      gridGraphics.lineTo(gridEndX, y);
-      gridGraphics.strokePath();
-    }
-    
-    // nogice mize
-    const legWidth = 20;
-    const legHeight = 150;
-    this.add.rectangle(tableX - tableWidth/2 + 40, tableY + tableHeight/2 + 20, legWidth, legHeight, 0x654321);
-    this.add.rectangle(tableX + tableWidth/2 - 40, tableY + tableHeight/2 + 20, legWidth, legHeight, 0x654321);
-    
-    // interaktivnost mize
-    const interactiveZone = this.add.zone(tableX, tableY + tableHeight/2, tableWidth, tableHeight)
-      .setInteractive({ useHandCursor: true });
-    
-    const instruction = this.add.text(tableX, tableY - 80, 'Klikni na mizo in začni graditi svoj električni krog!', {
-      fontSize: '24px',
-      color: '#333',
-      fontStyle: 'bold',
-      backgroundColor: '#ffffff',
-      padding: { x: 20, y: 10 }
-    }).setOrigin(0.5);
-    
-    // animacija besedila
+    this.scale.on("resize", this.resize, this);
+
+    // Background
+    this.createBackground(width, height);
+    this.createParticles(width, height);
+
+    const centerX = width / 2;
+    const centerY = height / 2;
+
+    const username = localStorage.getItem("username");
+    const pfp = localStorage.getItem("profilePic");
+
+    // Top Bar
+    this.createTopBar(width, username, pfp);
+
+    // Hero Section
+    const heroText = this.add
+      .text(centerX, centerY - 120, "Pripravljen na gradnjo vezij?", {
+        ...Theme.text.header,
+        fontSize: "42px",
+        color: "#ffffff",
+      })
+      .setOrigin(0.5)
+      .setAlpha(0);
+
+    const subText = this.add
+      .text(
+        centerX,
+        centerY - 60,
+        "Začni ustvarjati električna vezja in rešuj izzive",
+        {
+          ...Theme.text.subheader,
+          fontSize: "18px",
+          color: Theme.colors.text.secondary,
+        }
+      )
+      .setOrigin(0.5)
+      .setAlpha(0);
+
+    // Animations
     this.tweens.add({
-      targets: instruction,
-      alpha: 0.5,
-      duration: 1000,
-      yoyo: true,
-      repeat: -1
+      targets: heroText,
+      alpha: 1,
+      y: centerY - 100,
+      duration: 800,
+      ease: "Back.easeOut",
     });
-    
-    // zoom na mizo
-    interactiveZone.on('pointerdown', () => {
-      this.cameras.main.fade(300, 0, 0, 0);
-      this.time.delayedCall(300, () => {
-        this.scene.start('WorkspaceScene', { mode: 'challenge' });
+    this.tweens.add({ targets: subText, alpha: 1, duration: 800, delay: 200 });
+
+    // Mode Cards
+    const isSmallScreen = width < 768;
+    const cardY = centerY + 80;
+
+    if (isSmallScreen) {
+      this.createModeCard(
+        centerX,
+        centerY + 40,
+        "Način z izzivi",
+        "Preizkusi svoje znanje",
+        Theme.colors.primary,
+        () => this.startMode("challenge")
+      );
+      this.createModeCard(
+        centerX,
+        centerY + 220,
+        "Peskovnik",
+        "Prosto eksperimentiraj",
+        Theme.colors.warning,
+        () => this.startMode("sandbox")
+      );
+    } else {
+      this.createModeCard(
+        centerX - 180,
+        cardY,
+        "Način z izzivi",
+        "Preizkusi svoje znanje s strukturiranimi izzivi",
+        Theme.colors.primary,
+        () => this.startMode("challenge")
+      );
+      this.createModeCard(
+        centerX + 180,
+        cardY,
+        "Peskovnik",
+        "Prosto eksperimentiraj z vezji",
+        Theme.colors.warning,
+        () => this.startMode("sandbox")
+      );
+    }
+  }
+
+  startMode(mode) {
+    this.cameras.main.fade(300, 0, 0, 0);
+    this.time.delayedCall(300, () => {
+      this.scene.start("WorkspaceScene", { mode });
+    });
+  }
+
+  createBackground(width, height) {
+    this.cameras.main.setBackgroundColor(Theme.colors.background);
+    const bg = this.add.graphics();
+    bg.fillGradientStyle(
+      Theme.colors.background,
+      Theme.colors.background,
+      0x1e1b4b,
+      0x312e81,
+      1
+    );
+    bg.fillRect(0, 0, width, height);
+    bg.setDepth(-100);
+
+    const grid = this.add.graphics();
+    grid.lineStyle(1, Theme.colors.primary, 0.05);
+    const size = 60;
+    for (let x = 0; x < width; x += size) {
+      grid.moveTo(x, 0);
+      grid.lineTo(x, height);
+    }
+    for (let y = 0; y < height; y += size) {
+      grid.moveTo(0, y);
+      grid.lineTo(width, y);
+    }
+    grid.strokePath();
+    grid.setDepth(-90);
+  }
+
+  createParticles(width, height) {
+    for (let i = 0; i < 20; i++) {
+      const x = Phaser.Math.Between(0, width);
+      const y = Phaser.Math.Between(0, height);
+      this.add
+        .circle(x, y, Phaser.Math.Between(2, 4), Theme.colors.primary, 0.2)
+        .setDepth(-80);
+    }
+  }
+
+  createTopBar(width, username, pfp) {
+    const barHeight = 80;
+    const bar = this.add.graphics();
+    bar.fillStyle(Theme.colors.surface, 0.9);
+    bar.fillRect(0, 0, width, barHeight);
+    bar.lineStyle(1, Theme.colors.border, 1);
+    bar.lineBetween(0, barHeight, width, barHeight);
+
+    // Avatar
+    if (pfp) {
+      const avatarBg = this.add.circle(60, 40, 24, Theme.colors.primary, 0.2);
+      const img = this.add.image(60, 40, pfp).setDisplaySize(40, 40);
+      const mask = avatarBg.createGeometryMask();
+      img.setMask(mask);
+    }
+
+    // Username
+    if (width > 600 && username) {
+      this.add
+        .text(100, 40, username, {
+          ...Theme.text.body,
+          fontSize: "18px",
+          fontStyle: "600",
+        })
+        .setOrigin(0, 0.5);
+    }
+
+    // Buttons
+    const btnStyle = {
+      ...Theme.text.button,
+      fontSize: "14px",
+      color: Theme.colors.text.secondary,
+    };
+
+    // Logout
+    const logoutBtn = this.add
+      .text(width - 100, 40, "Odjava", btnStyle)
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true })
+      .on("pointerover", () => logoutBtn.setColor(Theme.colors.text.primary))
+      .on("pointerout", () => logoutBtn.setColor(Theme.colors.text.secondary))
+      .on("pointerdown", () => {
+        localStorage.removeItem("username");
+        this.scene.start("MenuScene");
       });
-    });
-    
-    interactiveZone.on('pointerover', () => {
-      tableSurface.setFillStyle(0xb09070);
-    });
-    
-    interactiveZone.on('pointerout', () => {
-      tableSurface.setFillStyle(0xa0826d);
-    });
 
-    const username = localStorage.getItem('username');
-    const pfp = localStorage.getItem('profilePic');
+    // Leaderboard
+    const lbBtn = this.add
+      .text(width - 200, 40, "Lestvica", btnStyle)
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true })
+      .on("pointerover", () => lbBtn.setColor(Theme.colors.text.primary))
+      .on("pointerout", () => lbBtn.setColor(Theme.colors.text.secondary))
+      .on("pointerdown", () => {
+        this.scene.start("ScoreboardScene", { cameFromMenu: true });
+      });
+  }
 
-    // avvatar
-    const avatarX = 230;
-    const avatarY = 55;
-    const avatarRadius = 30;
-    const borderThickness = 4;
+  createModeCard(x, y, title, description, color, callback) {
+    const width = 300;
+    const height = 180;
+    const container = this.add.container(x, y);
 
-    // zunanji siv krog (rob)
-    const borderCircle = this.add.circle(avatarX, avatarY, avatarRadius + borderThickness, 0xcccccc);
+    const bg = this.add.graphics();
+    const drawBg = (c, alpha) => {
+      bg.clear();
+      bg.fillStyle(Theme.colors.surface, alpha);
+      bg.fillRoundedRect(-width / 2, -height / 2, width, height, 16);
+      bg.lineStyle(2, c, 0.5);
+      bg.strokeRoundedRect(-width / 2, -height / 2, width, height, 16);
+    };
+    drawBg(color, 0.6);
+    container.add(bg);
 
-    // notranji bel krog (ozadje za avatar)
-    const innerCircle = this.add.circle(avatarX, avatarY, avatarRadius, 0xffffff);
+    // Icon
+    container.add(this.add.circle(0, -40, 30, color, 0.2));
+    container.add(
+      this.add.text(0, -40, "⚡", { fontSize: "32px" }).setOrigin(0.5)
+    );
 
-    // slika avatarja
-    const avatarImage = this.add.image(avatarX, avatarY, pfp)
-        .setDisplaySize(avatarRadius * 2, avatarRadius * 2);
-
-    // maska, da je slika samo znotraj notranjega kroga
-    const mask = innerCircle.createGeometryMask();
-    avatarImage.setMask(mask);
-
-    // pozdravno besedilo
-    this.add.text(avatarX + 60, avatarY - 10, `Dobrodošel v laboratoriju, uporabnik ${username}!`, {
-        fontSize: '22px',
-        color: '#222',
-        fontStyle: 'bold'
-    });
-
-
-    const logoutButton = this.add.text(40, 30, '↩ Odjavi se', {
-        fontFamily: 'Arial',
-        fontSize: '20px',
-        color: '#0066ff',
-        padding: { x: 20, y: 10 }
-    })
-        .setOrigin(0, 0)
-        .setInteractive({ useHandCursor: true })
-        .on('pointerover', () => logoutButton.setStyle({ color: '#0044cc' }))
-        .on('pointerout', () => logoutButton.setStyle({ color: '#0066ff' }))
-        .on('pointerdown', () => {
-            localStorage.removeItem('username');
-            this.scene.start('MenuScene');
-        });
-
-    const buttonWidth = 180;
-    const buttonHeight = 45;
-    const cornerRadius = 10;
-    const rightMargin = 60;
-    const topMargin = 40;
-
-    // za scoreboard
-    const scoreButtonBg = this.add.graphics();
-    scoreButtonBg.fillStyle(0x3399ff, 1);
-    scoreButtonBg.fillRoundedRect(width - buttonWidth - rightMargin, topMargin, buttonWidth, buttonHeight, cornerRadius);
-
-    const scoreButton = this.add.text(width - buttonWidth / 2 - rightMargin, topMargin + buttonHeight / 2, 'Lestvica', {
-        fontFamily: 'Arial',
-        fontSize: '20px',
-        color: '#ffffff'
-    })
+    // Text
+    container.add(
+      this.add
+        .text(0, 10, title, {
+          ...Theme.text.header,
+          fontSize: "20px",
+        })
         .setOrigin(0.5)
-        .setInteractive({ useHandCursor: true })
-        .on('pointerover', () => {
-            scoreButtonBg.clear();
-            scoreButtonBg.fillStyle(0x0f5cad, 1);
-            scoreButtonBg.fillRoundedRect(width - buttonWidth - rightMargin, topMargin, buttonWidth, buttonHeight, cornerRadius);
-        })
-        .on('pointerout', () => {
-            scoreButtonBg.clear();
-            scoreButtonBg.fillStyle(0x3399ff, 1);
-            scoreButtonBg.fillRoundedRect(width - buttonWidth - rightMargin, topMargin, buttonWidth, buttonHeight, cornerRadius);
-        })
-        .on('pointerdown', () => {
-            this.scene.start('ScoreboardScene', {cameFromMenu: true});
-        });
+    );
 
-    // za sandbox
-    const sandboxButtonBg = this.add.graphics();
-    sandboxButtonBg.fillStyle(0xff9933, 1);
-    sandboxButtonBg.fillRoundedRect(width - buttonWidth - rightMargin, topMargin + 60, buttonWidth, buttonHeight, cornerRadius);
-
-    const sandboxButton = this.add.text(width - buttonWidth / 2 - rightMargin, topMargin + buttonHeight / 2 + 60, 'Sandbox', {
-        fontFamily: 'Arial',
-        fontSize: '20px',
-        color: '#ffffff'
-    })
+    container.add(
+      this.add
+        .text(0, 45, description, {
+          ...Theme.text.body,
+          fontSize: "14px",
+          color: Theme.colors.text.secondary,
+          align: "center",
+          wordWrap: { width: width - 40 },
+        })
         .setOrigin(0.5)
-        .setInteractive({ useHandCursor: true })
-        .on('pointerover', () => {
-            sandboxButtonBg.clear();
-            sandboxButtonBg.fillStyle(0xcc7722, 1);
-            sandboxButtonBg.fillRoundedRect(width - buttonWidth - rightMargin, topMargin + 60, buttonWidth, buttonHeight, cornerRadius);
-        })
-        .on('pointerout', () => {
-            sandboxButtonBg.clear();
-            sandboxButtonBg.fillStyle(0xff9933, 1);
-            sandboxButtonBg.fillRoundedRect(width - buttonWidth - rightMargin, topMargin + 60, buttonWidth, buttonHeight, cornerRadius);
-        })
-        .on('pointerdown', () => {
-            this.cameras.main.fade(300, 0, 0, 0);
-            this.time.delayedCall(300, () => {
-                this.scene.start('WorkspaceScene', { mode: 'sandbox' });
-            });
-        });
+    );
 
-    // this.input.keyboard.on('keydown-ESC', () => {
-    //     this.scene.start('MenuScene');
-    // });
+    // Interactive
+    container.setSize(width, height);
+    container.setInteractive({ useHandCursor: true });
 
-    //console.log(`${localStorage.getItem('username')}`);
-    console.log(JSON.parse(localStorage.getItem('users')));
+    container.on("pointerover", () => {
+      this.tweens.add({ targets: container, scale: 1.05, duration: 200 });
+      drawBg(color, 0.8);
+    });
+
+    container.on("pointerout", () => {
+      this.tweens.add({ targets: container, scale: 1, duration: 200 });
+      drawBg(color, 0.6);
+    });
+
+    container.on("pointerdown", callback);
+
+    // Entrance
+    container.setAlpha(0).setY(y + 20);
+    this.tweens.add({
+      targets: container,
+      alpha: 1,
+      y: y,
+      duration: 600,
+      delay: 400,
+      ease: "Back.easeOut",
+    });
   }
 
   resize(gameSize) {
     const { width, height } = gameSize;
-    
-    // Recreate the entire scene on resize to properly reposition all elements
     this.scene.restart();
   }
 }
