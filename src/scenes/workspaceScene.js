@@ -1589,14 +1589,101 @@ export default class WorkspaceScene extends Phaser.Scene {
         continue;
       }
 
+      // Check if bulb is burned out
+      if (logicComp.isBurnedOut) {
+        // Show burned out bulb - dark tint and smoke effect
+        bulbImage.setTint(0x333333); // Dark gray tint
+        
+        // Remove any glow effect
+        const glowCircle = component.getData("glowCircle");
+        if (glowCircle) {
+          glowCircle.setVisible(false);
+          this.tweens.killTweensOf(glowCircle);
+        }
+        
+        // Add burned out indicator label if not exists
+        let burnedLabel = component.getData("burnedLabel");
+        if (!burnedLabel || !burnedLabel.active) {
+          if (burnedLabel) {
+            component.remove(burnedLabel, true);
+          }
+          burnedLabel = this.add.text(0, 45, "💥 PREGORELA", {
+            fontSize: "11px",
+            color: "#ffffff",
+            backgroundColor: "#cc0000",
+            padding: { x: 4, y: 2 },
+            fontStyle: "bold"
+          }).setOrigin(0.5);
+          component.add(burnedLabel);
+          burnedLabel.setPosition(0, 45);
+          component.setData("burnedLabel", burnedLabel);
+        }
+        burnedLabel.setVisible(true);
+        
+        // Hide wattage label for burned bulbs
+        const wattageLabel = component.getData("wattageLabel");
+        if (wattageLabel) {
+          wattageLabel.setVisible(false);
+        }
+        
+        continue; // Skip normal on/off logic for burned bulbs
+      }
+
+      // Hide burned label if bulb is not burned
+      const burnedLabel = component.getData("burnedLabel");
+      if (burnedLabel) {
+        burnedLabel.setVisible(false);
+      }
+
       const isOn = logicComp.is_on && simulationResult === 1;
       console.log(`Bulb ${logicComp.id}: is_on=${logicComp.is_on}, simulationResult=${simulationResult}, isOn=${isOn}`);
       
+      // Update wattage label
+      let wattageLabel = component.getData("wattageLabel");
+      if (!wattageLabel || !wattageLabel.active) {
+        if (wattageLabel) {
+          component.remove(wattageLabel, true);
+        }
+        wattageLabel = this.add.text(0, -45, "", {
+          fontSize: "12px",
+          color: "#ffffff",
+          backgroundColor: "#4488ffaa",
+          padding: { x: 4, y: 2 },
+          fontStyle: "bold"
+        }).setOrigin(0.5);
+        component.add(wattageLabel);
+        wattageLabel.setPosition(0, -45);
+        component.setData("wattageLabel", wattageLabel);
+      }
+      
+      if (isOn && logicComp.currentWattage > 0) {
+        const wattagePercent = (logicComp.currentWattage / logicComp.maxWattage) * 100;
+        const color = wattagePercent > 80 ? "#ff4444" : (wattagePercent > 50 ? "#ffaa00" : "#44ff44");
+        wattageLabel.setText(`${logicComp.currentWattage.toFixed(2)}W / ${logicComp.maxWattage}W`);
+        wattageLabel.setBackgroundColor(wattagePercent > 80 ? "#cc0000aa" : "#4488ffaa");
+        wattageLabel.setVisible(true);
+      } else {
+        wattageLabel.setText(`Max: ${logicComp.maxWattage}W`);
+        wattageLabel.setBackgroundColor("#666666aa");
+        wattageLabel.setVisible(true);
+      }
+      
       if (isOn) {
-        // Add glow effect when bulb is on
-        bulbImage.setTint(0xffff99); // Bright yellow tint
+        // Calculate brightness based on power (wattage percentage)
+        const wattagePercent = Math.min((logicComp.currentWattage / logicComp.maxWattage) * 100, 100);
+        // Ensure minimum brightness of 50% so low power is still visible
+        const brightness = Math.max(0.5, wattagePercent / 100);
         
-        // Add a glowing circle around the bulb
+        // Calculate tint color based on power - from warm orange to bright yellow/white
+        // Low power: warm orange (0xffbb66), High power: bright yellow-white (0xffffdd)
+        const r = 255;
+        const g = Math.floor(187 + (brightness * 68)); // 187-255
+        const b = Math.floor(102 + (brightness * 119)); // 102-221
+        const tintColor = (r << 16) | (g << 8) | b;
+        
+        bulbImage.setTint(tintColor);
+        
+        // Add a glowing circle around the bulb with intensity based on power
         if (!component.getData("glowCircle")) {
           const glowCircle = this.add.circle(0, 0, 38, 0xffee44, 0.5);
           glowCircle.setBlendMode(Phaser.BlendModes.ADD);
@@ -1607,12 +1694,39 @@ export default class WorkspaceScene extends Phaser.Scene {
         const glowCircle = component.getData("glowCircle");
         if (glowCircle) {
           glowCircle.setVisible(true);
-          // Pulsing glow effect
+          
+          // Set glow color based on power - orange for low, yellow for medium, white-ish for high
+          let glowColor;
+          if (wattagePercent > 80) {
+            glowColor = 0xffffaa; // Bright yellowish-white (high power, near burnout)
+          } else if (wattagePercent > 50) {
+            glowColor = 0xffee44; // Bright yellow
+          } else if (wattagePercent > 25) {
+            glowColor = 0xffcc22; // Orange-yellow
+          } else {
+            glowColor = 0xffbb44; // Warm orange (more visible than before)
+          }
+          
+          // Alpha based on brightness but with higher minimum
+          const glowAlpha = 0.4 + (brightness * 0.4); // 0.6 to 0.8
+          glowCircle.setFillStyle(glowColor, glowAlpha);
+          
+          // Scale glow size based on brightness - smaller at low power
+          const glowScale = 0.5 + (brightness * 0.7); // 0.5 to 1.2
+          
+          // Kill existing tweens before adding new ones
+          this.tweens.killTweensOf(glowCircle);
+          
+          // Set base scale
+          glowCircle.setScale(glowScale);
+          
+          // Pulsing glow effect - more intense at higher power
+          const pulseIntensity = 0.05 + (brightness * 0.2); // 0.1 to 0.25
           this.tweens.add({
             targets: glowCircle,
-            alpha: { from: 0.4, to: 0.65 },
-            scale: { from: 1, to: 1.1 },
-            duration: 1200,
+            alpha: { from: glowAlpha * 0.7, to: glowAlpha },
+            scale: { from: glowScale, to: glowScale + pulseIntensity },
+            duration: 1400 - (brightness * 400), // Faster pulse at higher power
             yoyo: true,
             repeat: -1,
             ease: 'Sine.easeInOut'
@@ -2266,6 +2380,13 @@ case "voltmeter":
         if (logicComp && logicComp.type === "resistor" && !this.dialogCooldown) {
           this.dialogCooldown = true;
           this.showResistanceDialog(logicComp, component);
+          this.time.delayedCall(500, () => { this.dialogCooldown = false; });
+        }
+
+        // Handle bulb wattage adjustment or replacement on click (with cooldown)
+        if (logicComp && logicComp.type === "bulb" && !this.dialogCooldown) {
+          this.dialogCooldown = true;
+          this.showBulbDialog(logicComp, component);
           this.time.delayedCall(500, () => { this.dialogCooldown = false; });
         }
       }
@@ -3318,6 +3439,221 @@ case "voltmeter":
     inputField.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         confirmBtn.emit('pointerdown');
+      } else if (e.key === 'Escape') {
+        cancelBtn.emit('pointerdown');
+      }
+    });
+  }
+
+  /**
+   * Show dialog to adjust bulb wattage or replace burned bulb
+   */
+  showBulbDialog(logicComp, component) {
+    const currentWattage = logicComp.maxWattage || 5;
+    const isBurnedOut = logicComp.isBurnedOut || false;
+    const { width, height } = this.cameras.main;
+
+    // Semi-transparent background overlay
+    const overlay = this.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.7)
+      .setOrigin(0.5)
+      .setDepth(2000)
+      .setScrollFactor(0);
+
+    // Dialog background
+    const dialogWidth = 400;
+    const dialogHeight = isBurnedOut ? 300 : 250;
+    const dialogBg = this.add.graphics();
+    dialogBg.setDepth(2001);
+    dialogBg.setScrollFactor(0);
+    dialogBg.fillStyle(0xffffff, 1);
+    dialogBg.fillRoundedRect(width / 2 - dialogWidth / 2, height / 2 - dialogHeight / 2, dialogWidth, dialogHeight, 15);
+    dialogBg.lineStyle(3, isBurnedOut ? 0xcc0000 : 0xffcc00, 1);
+    dialogBg.strokeRoundedRect(width / 2 - dialogWidth / 2, height / 2 - dialogHeight / 2, dialogWidth, dialogHeight, 15);
+
+    // Title
+    const titleText = this.add.text(width / 2, height / 2 - (isBurnedOut ? 110 : 80), 
+      isBurnedOut ? '💥 Žarnica je pregorela!' : 'Nastavi moč žarnice', {
+      fontSize: '22px',
+      color: isBurnedOut ? '#cc0000' : '#222',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    // Current wattage display
+    const currentText = this.add.text(width / 2, height / 2 - (isBurnedOut ? 70 : 40), 
+      `Maksimalna moč: ${currentWattage.toFixed(1)} W`, {
+      fontSize: '16px',
+      color: '#666'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    // Burned out explanation
+    let burnedText = null;
+    if (isBurnedOut) {
+      burnedText = this.add.text(width / 2, height / 2 - 35, 
+        'Žarnica je pregorela zaradi prevelike moči.\nKlikni "Zamenjaj" za novo žarnico.', {
+        fontSize: '14px',
+        color: '#666',
+        align: 'center'
+      }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+    }
+
+    // HTML Input field (for wattage)
+    const inputField = document.createElement('input');
+    inputField.type = 'number';
+    inputField.value = currentWattage;
+    inputField.min = '1';
+    inputField.max = '100';
+    inputField.step = '0.5';
+    inputField.style.position = 'absolute';
+    inputField.style.left = `${width / 2 - 100}px`;
+    inputField.style.top = `${height / 2 + (isBurnedOut ? 15 : -5)}px`;
+    inputField.style.width = '200px';
+    inputField.style.height = '40px';
+    inputField.style.fontSize = '18px';
+    inputField.style.textAlign = 'center';
+    inputField.style.borderRadius = '8px';
+    inputField.style.border = `2px solid ${isBurnedOut ? '#cc0000' : '#ffcc00'}`;
+    inputField.style.outline = 'none';
+    inputField.style.padding = '5px';
+    inputField.style.zIndex = '3000';
+    document.body.appendChild(inputField);
+    inputField.focus();
+
+    // Error message
+    const errorText = this.add.text(width / 2, height / 2 + (isBurnedOut ? 70 : 50), '', {
+      fontSize: '14px',
+      color: '#cc0000'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0);
+
+    // Buttons
+    const buttonWidth = isBurnedOut ? 100 : 120;
+    const buttonHeight = 40;
+    const buttonY = height / 2 + (isBurnedOut ? 115 : 90);
+
+    // Helper to clean up dialog
+    const closeDialog = () => {
+      inputField.remove();
+      overlay.destroy();
+      dialogBg.destroy();
+      titleText.destroy();
+      currentText.destroy();
+      errorText.destroy();
+      cancelBg.destroy();
+      cancelBtn.destroy();
+      confirmBg.destroy();
+      confirmBtn.destroy();
+      if (burnedText) burnedText.destroy();
+      if (replaceBg) replaceBg.destroy();
+      if (replaceBtn) replaceBtn.destroy();
+    };
+
+    // Cancel button
+    const cancelBg = this.add.graphics();
+    cancelBg.setDepth(2001).setScrollFactor(0);
+    cancelBg.fillStyle(0xcccccc, 1);
+    const cancelX = isBurnedOut ? width / 2 - buttonWidth * 1.5 - 15 : width / 2 - buttonWidth - 10;
+    cancelBg.fillRoundedRect(cancelX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+
+    const cancelBtn = this.add.text(cancelX + buttonWidth / 2, buttonY, 'Prekliči', {
+      fontSize: '16px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerover', () => {
+        cancelBg.clear();
+        cancelBg.fillStyle(0xaaaaaa, 1);
+        cancelBg.fillRoundedRect(cancelX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerout', () => {
+        cancelBg.clear();
+        cancelBg.fillStyle(0xcccccc, 1);
+        cancelBg.fillRoundedRect(cancelX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerdown', closeDialog);
+
+    // Replace button (only if burned out)
+    let replaceBg = null;
+    let replaceBtn = null;
+    if (isBurnedOut) {
+      replaceBg = this.add.graphics();
+      replaceBg.setDepth(2001).setScrollFactor(0);
+      replaceBg.fillStyle(0x00aa00, 1);
+      const replaceX = width / 2 - buttonWidth / 2;
+      replaceBg.fillRoundedRect(replaceX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+
+      replaceBtn = this.add.text(replaceX + buttonWidth / 2, buttonY, 'Zamenjaj', {
+        fontSize: '16px',
+        color: '#ffffff',
+        fontStyle: 'bold'
+      }).setOrigin(0.5).setDepth(2002).setScrollFactor(0)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerover', () => {
+          replaceBg.clear();
+          replaceBg.fillStyle(0x008800, 1);
+          replaceBg.fillRoundedRect(replaceX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+        })
+        .on('pointerout', () => {
+          replaceBg.clear();
+          replaceBg.fillStyle(0x00aa00, 1);
+          replaceBg.fillRoundedRect(replaceX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+        })
+        .on('pointerdown', () => {
+          const newWattage = parseFloat(inputField.value);
+          if (!isNaN(newWattage) && newWattage >= 1 && newWattage <= 100) {
+            // Replace the bulb (fix it and set new wattage)
+            logicComp.replace();
+            logicComp.maxWattage = newWattage;
+            console.log(`Bulb ${logicComp.id} replaced with ${newWattage}W capacity`);
+            closeDialog();
+            this.rebuildGraph();
+          } else {
+            errorText.setText('Prosim vnesi veljavno moč med 1 in 100 W');
+          }
+        });
+    }
+
+    // Confirm button (set wattage)
+    const confirmBg = this.add.graphics();
+    confirmBg.setDepth(2001).setScrollFactor(0);
+    confirmBg.fillStyle(0xffcc00, 1);
+    const confirmX = isBurnedOut ? width / 2 + buttonWidth / 2 + 15 : width / 2 + 10;
+    confirmBg.fillRoundedRect(confirmX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+
+    const confirmBtn = this.add.text(confirmX + buttonWidth / 2, buttonY, 'Potrdi', {
+      fontSize: '16px',
+      color: '#222',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(2002).setScrollFactor(0)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerover', () => {
+        confirmBg.clear();
+        confirmBg.fillStyle(0xccaa00, 1);
+        confirmBg.fillRoundedRect(confirmX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerout', () => {
+        confirmBg.clear();
+        confirmBg.fillStyle(0xffcc00, 1);
+        confirmBg.fillRoundedRect(confirmX, buttonY - buttonHeight / 2, buttonWidth, buttonHeight, 8);
+      })
+      .on('pointerdown', () => {
+        const wattage = parseFloat(inputField.value);
+        if (!isNaN(wattage) && wattage >= 1 && wattage <= 100) {
+          logicComp.maxWattage = wattage;
+          console.log(`Bulb ${logicComp.id} max wattage set to ${wattage}W`);
+          closeDialog();
+          this.rebuildGraph();
+        } else {
+          errorText.setText('Prosim vnesi veljavno moč med 1 in 100 W');
+        }
+      });
+
+    // Allow Enter key to confirm
+    inputField.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        if (isBurnedOut) {
+          replaceBtn.emit('pointerdown');
+        } else {
+          confirmBtn.emit('pointerdown');
+        }
       } else if (e.key === 'Escape') {
         cancelBtn.emit('pointerdown');
       }

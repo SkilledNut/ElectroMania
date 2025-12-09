@@ -60,8 +60,14 @@ class CircuitGraph {
     // Switch conductivity depends on state
     if (comp.type === "switch") return comp.is_on === true;
 
-    // Wires, bulbs, resistors, and ammeters conduct
-    return ["wire", "bulb", "resistor", "ammeter"].includes(comp.type);
+    // Bulb conductivity - check if burned out
+    if (comp.type === "bulb") {
+      const isBurnedOut = comp.originalComponent?.isBurnedOut || false;
+      return !isBurnedOut;
+    }
+
+    // Wires, resistors, and ammeters conduct
+    return ["wire", "resistor", "ammeter"].includes(comp.type);
   }
 
   /**
@@ -484,11 +490,29 @@ class CircuitGraph {
     }
 
     // Update bulbs - only turn on if in a complete circuit path
+    // Also check for burnout based on current
     const bulbs = this.components.filter((c) => c.type === "bulb");
+    const burnedOutBulbs = [];
+    
     for (const bulb of bulbs) {
       const isInPath = componentsInPath.has(bulb.id);
       if (bulb.originalComponent) {
-        bulb.originalComponent.is_on = isComplete && isInPath;
+        // Check if bulb is burned out
+        if (bulb.originalComponent.isBurnedOut) {
+          bulb.originalComponent.is_on = false;
+          continue;
+        }
+        
+        // Check for burnout if circuit is complete and bulb is in path
+        if (isComplete && isInPath) {
+          const justBurnedOut = bulb.originalComponent.checkBurnout(measurements.current);
+          if (justBurnedOut) {
+            burnedOutBulbs.push(bulb.id);
+          }
+        }
+        
+        // Update bulb state
+        bulb.originalComponent.is_on = isComplete && isInPath && !bulb.originalComponent.isBurnedOut;
       }
     }
 
@@ -518,18 +542,21 @@ class CircuitGraph {
     console.log(
       `[Graph] ${bulbs.length} bulb(s), ${bulbs.filter(b => componentsInPath.has(b.id)).length} in path`
     );
+    if (burnedOutBulbs.length > 0) {
+      console.log(`[Graph] 💥 Bulbs burned out this cycle: ${burnedOutBulbs.join(', ')}`);
+    }
 
     const batteries = this.components.filter((c) => c.type === "battery");
     if (batteries.length === 0) {
       console.log("[Graph] No battery found, circuit is OPEN");
-      return { status: -1, paths: [], componentsInPath: componentsInPath };
+      return { status: -1, paths: [], componentsInPath: componentsInPath, burnedOutBulbs: [] };
     }
 
     if (isComplete) {
       console.log(`[Graph] Circuit is COMPLETE`);
       console.log(`[Graph] Bulbs in path: ${bulbs.filter(b => componentsInPath.has(b.id)).map(b => b.id).join(', ')}`);
       console.log(`[Graph] Measurements: ${measurements.current.toFixed(2)}A, ${measurements.voltage.toFixed(2)}V`);
-      return { status: 1, paths: paths, measurements: measurements, componentsInPath: componentsInPath };
+      return { status: 1, paths: paths, measurements: measurements, componentsInPath: componentsInPath, burnedOutBulbs: burnedOutBulbs };
     }
 
     const hasSwitch = this.components.some((c) => c.type === "switch");
@@ -540,12 +567,12 @@ class CircuitGraph {
     if (hasSwitch && anySwitchOff) {
       console.log("[Graph] Circuit OPEN due to switch being OFF");
       console.log(`[Graph] ${bulbs.length} bulb(s) turned OFF`);
-      return { status: -2, paths: [], componentsInPath: componentsInPath };
+      return { status: -2, paths: [], componentsInPath: componentsInPath, burnedOutBulbs: burnedOutBulbs };
     }
 
     console.log("[Graph] Circuit OPEN (no complete path)");
     console.log(`[Graph] ${bulbs.length} bulb(s) turned OFF`);
-    return { status: 0, paths: [], componentsInPath: componentsInPath };
+    return { status: 0, paths: [], componentsInPath: componentsInPath, burnedOutBulbs: burnedOutBulbs };
   }
 }
 
