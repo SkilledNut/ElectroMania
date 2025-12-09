@@ -4834,7 +4834,7 @@ case "fuse":
     
     // Legend background
     const legendWidth = this.minimapWidth;
-    const legendHeight = 95;
+    const legendHeight = 115;
     const legendBg = this.add.rectangle(0, 0, legendWidth, legendHeight, 0xffffff, 0.95).setOrigin(0);
     legendBg.setStrokeStyle(2, 0x4a3c2a);
     this.minimapLegendContainer.add(legendBg);
@@ -4855,7 +4855,9 @@ case "fuse":
       { color: 0x666666, label: "Stikalo" },
       { color: 0x0066cc, label: "Žica" },
       { color: 0x00cc66, label: "Ampermeter" },
-      { color: 0x9900cc, label: "Voltmeter" }
+      { color: 0x9900cc, label: "Voltmeter" },
+      { color: 0xff3333, label: "LED" },
+      { color: 0xcccccc, label: "Varovalka" }
     ];
     
     const startY = 26;
@@ -4864,8 +4866,8 @@ case "fuse":
     const col2X = legendWidth / 2 + 5;
     
     legendItems.forEach((item, index) => {
-      const col = index < 4 ? 0 : 1;
-      const row = index < 4 ? index : index - 4;
+      const col = index < 5 ? 0 : 1;
+      const row = index < 5 ? index : index - 5;
       const x = col === 0 ? col1X : col2X;
       const y = startY + row * itemHeight;
       
@@ -5051,7 +5053,9 @@ case "fuse":
       switch: 0x666666,
       wire: 0x0066cc,
       ammeter: 0x00cc66,
-      voltmeter: 0x9900cc
+      voltmeter: 0x9900cc,
+      led: 0xff3333,
+      fuse: 0xcccccc
     };
     
     const dotSize = this.minimapExpanded ? 5 : 4;
