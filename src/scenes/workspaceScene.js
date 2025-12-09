@@ -934,6 +934,8 @@ export default class WorkspaceScene extends Phaser.Scene {
       "žica": "žica",
       ammeter: "ammeter",
       voltmeter: "voltmeter",
+      led: "led",
+      fuse: "fuse",
     };
     return textureMap[type] || null;
   }
@@ -2585,12 +2587,22 @@ case "fuse":
         
         this.placedComponents.push(component);
 
-        this.createComponent(
+        // Find the index of this component in panelComponentObjects before creating replacement
+        const panelIndex = this.panelComponentObjects.indexOf(component);
+
+        const newPanelComponent = this.createComponent(
           component.getData("originalX"),
           component.getData("originalY"),
           component.getData("type"),
           component.getData("color")
         );
+
+        // Update panelComponentObjects with the new component
+        if (panelIndex > -1 && newPanelComponent) {
+          this.panelComponentObjects[panelIndex] = newPanelComponent;
+          // Re-apply scroll position to ensure new component is at correct visual position
+          this.updatePanelScroll();
+        }
 
         this.rebuildGraph();
       } else if (!wasInPanel) {
@@ -2614,10 +2626,11 @@ case "fuse":
         }
         this.rebuildGraph();
       } else {
-        // postavi se nazaj na originalno mesto
+        // Panel component stayed in panel - restore to correct scrolled position
         component.x = component.getData("originalX");
         component.y = component.getData("originalY");
-        this.rebuildGraph();
+        // Re-apply scroll position to ensure component is at correct visual position
+        this.updatePanelScroll();
       }
 
       this.time.delayedCall(500, () => {
