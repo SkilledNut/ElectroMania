@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth.js';
 import challengeRoutes from './routes/challenges.js';
 import sandboxRoutes from './routes/sandbox.js';
+import equationRunnerRoutes from './routes/equationRunner.js';
 import errorHandler from './middleware/errorHandler.js';
 import mongoose from 'mongoose';
 
@@ -30,6 +31,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/auth', authRoutes);
 app.use('/api/challenges', challengeRoutes);
 app.use('/api/sandbox', sandboxRoutes);
+app.use('/api/equationrunner', equationRunnerRoutes);
 
 app.use(errorHandler);
 

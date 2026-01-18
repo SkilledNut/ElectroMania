@@ -213,8 +213,10 @@ export default class LabScene extends Phaser.Scene {
       .on("pointerover", () => logoutBtn.setColor(Theme.colors.text.primary))
       .on("pointerout", () => logoutBtn.setColor(Theme.colors.text.secondary))
       .on("pointerdown", () => {
-        localStorage.removeItem("username");
-        this.scene.start("MenuScene");
+        // Clear all localStorage on logout
+        localStorage.clear();
+        // Force page reload to clear all cached data and scene state
+        window.location.reload();
       });
 
     // Leaderboard
