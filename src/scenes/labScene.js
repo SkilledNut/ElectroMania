@@ -72,7 +72,7 @@ export default class LabScene extends Phaser.Scene {
     if (isSmallScreen) {
       this.createModeCard(
         centerX,
-        centerY + 40,
+        centerY + 10,
         "Način z izzivi",
         "Preizkusi svoje znanje",
         Theme.colors.primary,
@@ -80,15 +80,23 @@ export default class LabScene extends Phaser.Scene {
       );
       this.createModeCard(
         centerX,
-        centerY + 220,
+        centerY + 200,
         "Peskovnik",
         "Prosto eksperimentiraj",
         Theme.colors.warning,
         () => this.startMode("sandbox")
       );
+      this.createModeCard(
+        centerX,
+        centerY + 390,
+        "Equation Runner",
+        "Reši enačbe v akcijski igri",
+        Theme.colors.secondary,
+        () => this.startMode("equation-runner")
+      );
     } else {
       this.createModeCard(
-        centerX - 180,
+        centerX - 360,
         cardY,
         "Način z izzivi",
         "Preizkusi svoje znanje s strukturiranimi izzivi",
@@ -96,12 +104,20 @@ export default class LabScene extends Phaser.Scene {
         () => this.startMode("challenge")
       );
       this.createModeCard(
-        centerX + 180,
+        centerX,
         cardY,
         "Peskovnik",
         "Prosto eksperimentiraj z vezji",
         Theme.colors.warning,
         () => this.startMode("sandbox")
+      );
+      this.createModeCard(
+        centerX + 360,
+        cardY,
+        "Equation Runner",
+        "Reši matematične enačbe v napeti akcijski igri",
+        Theme.colors.secondary,
+        () => this.startMode("equation-runner")
       );
     }
   }
@@ -109,7 +125,11 @@ export default class LabScene extends Phaser.Scene {
   startMode(mode) {
     this.cameras.main.fade(300, 0, 0, 0);
     this.time.delayedCall(300, () => {
-      this.scene.start("WorkspaceScene", { mode });
+      if (mode === "equation-runner") {
+        this.scene.start("EquationRunnerScene");
+      } else {
+        this.scene.start("WorkspaceScene", { mode });
+      }
     });
   }
 
@@ -225,10 +245,18 @@ export default class LabScene extends Phaser.Scene {
     drawBg(color, 0.6);
     container.add(bg);
 
-    // Icon
+    // Icon - different for each mode
     container.add(this.add.circle(0, -40, 30, color, 0.2));
+    
+    let icon = "⚡";
+    if (title === "Peskovnik") {
+      icon = "🔧";
+    } else if (title === "Equation Runner") {
+      icon = "🎮";
+    }
+    
     container.add(
-      this.add.text(0, -40, "⚡", { fontSize: "32px" }).setOrigin(0.5)
+      this.add.text(0, -40, icon, { fontSize: "32px" }).setOrigin(0.5)
     );
 
     // Text
